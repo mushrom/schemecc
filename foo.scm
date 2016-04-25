@@ -39,7 +39,7 @@
 (define (primcall? x)
   (and (list? x)
        (not (null? x))
-       (member? (car x) '(add1 + - < > =))))
+       (member? (car x) '(add1 + - < > = cons car cdr))))
 
 (define (let? x)
   (and (list? x)
@@ -150,6 +150,29 @@
 
        (emit-label L1)))
 
+      ((eq? op 'cons)
+       (emit-expr (primcall-op-2 x) sindex env)
+       (emit "mov [rsp - " sindex "], rax")
+       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+
+       (emit "mov [esi], rax")
+       (emit "mov rax, [rsp - " sindex "]" )
+       (emit "mov [esi+8], rax")
+       (emit "mov rax, rsi")
+       (emit "or rax, 1")
+       (emit "add rsi, 16"))
+
+      ((eq? op 'car)
+       (emit-expr (primcall-op-1 x) sindex env)
+       (emit "and rax, ~7")
+       (emit "mov rax, [rax]"))
+
+      ((eq? op 'cdr)
+       (emit-expr (primcall-op-1 x) sindex env)
+       (emit "and rax, ~7")
+       (emit "add rax, 8")
+       (emit "mov rax, [rax]"))
+
       (true 'asdf))))
 
 (define (extend-env var sindex env)
@@ -228,6 +251,7 @@
      (emit-let (bindings x) (body x) sindex env))
 
     ((if? x)
+     (emit-comment "if " (cadr x))
      (emit-if (cadr x) (caddr x) (caddr (cdr x)) sindex env))
 
     ((variable? x)
@@ -241,8 +265,10 @@
 
 (define (compile-program x)
   (emit-flag "bits 64")
+  (emit-flag "extern scheme_heap")
   (emit-flag "global scheme_thing")
   (emit-flag "scheme_thing:")
+  (emit "mov rsi, scheme_heap")
   (emit-expr x 8 '()) ; 8 so we don't overwrite the return pointer
   (emit "ret"))
 
@@ -254,7 +280,16 @@
 ;           (y 20))
 ;       (- (+ x y) 38))))
 
+;(compile-program
+;  '(let ((x 21)
+;         (y 20))
+;     (if (> x y)
+;       (cons 1 2)
+;       2)))
+
 (compile-program
-  '(if (> 3 2)
-     123
-     2))
+  '(let ((foo (cons 1 (cons 2 ())))
+         (bar (cons 3 (cons 4 ()))))
+     (cdr (cons foo bar))
+     ))
+  ;'(cdr (cons (cons 1 (cons 2 ())) (cons 3 (cons 4 ())))))

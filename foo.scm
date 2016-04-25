@@ -13,6 +13,16 @@
   (for-each display args)
   (newline))
 
+(define (emit-label labelspec)
+  (for-each display labelspec)
+  (display ":")
+  (newline))
+
+(define *cur-label* 0)
+(define (unique-label)
+  (set! *cur-label* (+ *cur-label* 1))
+  (list ".label" *cur-label*))
+
 (define (shift-left x amount)
   (if (> amount 0)
     (* 2 (shift-left x (- amount 1)))
@@ -23,17 +33,23 @@
 
 (define (immediate? x)
   (or (integer? x)
-      (null? x)))
+      (null? x)
+      (boolean? x)))
 
 (define (primcall? x)
   (and (list? x)
        (not (null? x))
-       (member? (car x) '(add1 + -))))
+       (member? (car x) '(add1 + - < > =))))
 
 (define (let? x)
   (and (list? x)
        (not (null? x))
        (eq? (car x) 'let)))
+
+(define (if? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'if)))
 
 (define variable? symbol?)
 
@@ -52,11 +68,17 @@
         ((null? x)
          47)
 
+        ((boolean? x)
+         (if x
+           #x9f
+           #x1f))
+
         (true "error: no immediate representation eh")))
 
 (define (emit-primitive-call x sindex env)
   (let ((op (primcall-op x)))
     (emit-comment "primcall " op ": " x)
+
     (cond
       ((eq? op 'add1)
        (emit-expr (primcall-op-1 x) sindex env)
@@ -72,7 +94,63 @@
        (emit-expr (primcall-op-2 x) sindex env)
        (emit "mov [rsp - " sindex "], rax")
        (emit-expr (primcall-op-1 x) (+ sindex 8) env)
-       (emit "sub rax, [rsp - " sindex "]")))))
+       (emit "sub rax, [rsp - " sindex "]"))
+
+      ((eq? op '<)
+       (let ((L0 (unique-label))
+             (L1 (unique-label)))
+       (emit-expr (primcall-op-2 x) sindex env)
+       (emit "mov [rsp - " sindex "], rax")
+       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+
+       (emit "cmp rax, [rsp - " sindex "]")
+       (emit-jl L0)
+
+       (emit "mov eax, " (immediate-rep #f))
+       (emit-jmp L1)
+
+       (emit-label L0)
+       (emit "mov eax, " (immediate-rep #t))
+
+       (emit-label L1)))
+
+      ((eq? op '>)
+       (let ((L0 (unique-label))
+             (L1 (unique-label)))
+       (emit-expr (primcall-op-2 x) sindex env)
+       (emit "mov [rsp - " sindex "], rax")
+       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+
+       (emit "cmp rax, [rsp - " sindex "]")
+       (emit-jg L0)
+
+       (emit "mov eax, " (immediate-rep #f))
+       (emit-jmp L1)
+
+       (emit-label L0)
+       (emit "mov eax, " (immediate-rep #t))
+
+       (emit-label L1)))
+
+      ((eq? op '=)
+       (let ((L0 (unique-label))
+             (L1 (unique-label)))
+       (emit-expr (primcall-op-2 x) sindex env)
+       (emit "mov [rsp - " sindex "], rax")
+       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+
+       (emit "cmp rax, [rsp - " sindex "]")
+       (emit-je L0)
+
+       (emit "mov eax, " (immediate-rep #f))
+       (emit-jmp L1)
+
+       (emit-label L0)
+       (emit "mov eax, " (immediate-rep #t))
+
+       (emit-label L1)))
+
+      (true 'asdf))))
 
 (define (extend-env var sindex env)
   (cons (list var sindex) env))
@@ -87,6 +165,9 @@
 
         (true
           (lookup x (cdr env)))))
+
+(define bindings cadr)
+(define body     caddr)
 
 (define (emit-let bindings body sindex env)
   (define (f b* new-env sindex)
@@ -106,18 +187,48 @@
   
   (f bindings env sindex))
 
-(define bindings cadr)
-(define body     caddr)
+(define (emit-cmp comp reg)
+  (emit "cmp " reg ", " comp))
+
+(define (emit-je labelspec)
+  (apply emit (cons "je " labelspec)))
+
+(define (emit-jl labelspec)
+  (apply emit (cons "jl " labelspec)))
+
+(define (emit-jg labelspec)
+  (apply emit (cons "jg " labelspec)))
+
+(define (emit-jmp labelspec)
+  (apply emit (cons "jmp " labelspec)))
+
+(define (emit-if test conseq altern sindex env)
+  (let ((L0 (unique-label))
+        (L1 (unique-label)))
+    (emit-expr test sindex env)
+    (emit-cmp (immediate-rep #f) 'rax)
+    (emit-je L0)
+
+    (emit-expr conseq sindex env)
+    (emit-jmp L1)
+
+    (emit-label L0)
+    (emit-expr altern sindex env)
+
+    (emit-label L1)))
 
 (define (emit-expr x sindex env)
   (cond
     ((immediate? x)
-     (emit-comment "immediate int " x)
+     (emit-comment "immediate " x)
      (emit "mov rax, " (immediate-rep x)))
 
     ((let? x)
      (emit-comment "got here")
      (emit-let (bindings x) (body x) sindex env))
+
+    ((if? x)
+     (emit-if (cadr x) (caddr x) (caddr (cdr x)) sindex env))
 
     ((variable? x)
      (emit-comment "variable " x)
@@ -136,7 +247,14 @@
   (emit "ret"))
 
 ;(compile-program '(+ 2 (- (+ 40 40) 40)))
+;(compile-program
+;  '(let ((x 20)
+;         (y 60))
+;     (let ((x (+ x y))
+;           (y 20))
+;       (- (+ x y) 38))))
+
 (compile-program
-  '(let ((x 20)
-         (y 60))
-     (- (+ x y) 38)))
+  '(if (> 3 2)
+     123
+     2))

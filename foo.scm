@@ -263,13 +263,115 @@
 
     (true (print "wut"))))
 
+(define (lambda? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'lambda)))
+
+(define lambda-args cadr)
+(define lambda-body cddr)
+
+(define trans-lambda-args cadr)
+(define trans-lambda-body cdddr)
+(define trans-lambda-free caddr)
+
+(define (gen-free-vars x defined-vars)
+  (cond
+    ((null? x)
+     '())
+
+    ((let? x)
+     (gen-free-vars
+       (body x)
+       (append (map car (cdr x)) defined-vars)))
+
+    ((primcall? x)
+     (gen-free-vars (cdr x) defined-vars))
+
+    ((variable? x)
+     (if (not (member? x defined-vars))
+       (list x)
+       '()))
+
+    ((lambda? x)
+     (gen-free-vars
+       (lambda-body x)
+       (append (lambda-args x) defined-vars)))
+
+    ((list? x)
+     (append (gen-free-vars (car x) defined-vars)
+             (gen-free-vars (cdr x) defined-vars)))
+
+    (true
+      '())))
+
+(define (transform-lambdas x)
+  (cond
+    ((null? x)
+     '())
+
+    ((lambda? x)
+     (cons
+       'lambda
+       (cons
+         (lambda-args x)
+         (cons
+           (gen-free-vars (lambda-body x) (lambda-args x))
+           (transform-lambdas (cddr x))))))
+
+    ((list? x)
+     (cons
+       (transform-lambdas (car x))
+       (transform-lambdas (cdr x))))
+
+    (true x)))
+
+(define (gen-labels x)
+  (define labels '())
+
+  (define (gen-closure x)
+    (let ((label (unique-label)))
+      (set! labels
+        (cons
+          (list label
+                (list 'code
+                      (trans-lambda-args x)
+                      (trans-lambda-free x)
+                      (apply values (replace-lambdas (trans-lambda-body x)))))
+          labels))
+
+      (list 'closure label (apply values (trans-lambda-free x)))))
+
+  (define (replace-lambdas x)
+    (cond
+      ((lambda? x)
+       (gen-closure x))
+
+      ((null? x)
+       '())
+
+      ((list? x)
+       (cons
+         (replace-lambdas (car x))
+         (replace-lambdas (cdr x))))
+
+      (true x)))
+
+  (let ((new-body (replace-lambdas x)))
+    (list 'labels labels new-body)))
+
+(load! "pretty.scm")
+
 (define (compile-program x)
   (emit-flag "bits 64")
   (emit-flag "extern scheme_heap")
   (emit-flag "global scheme_thing")
   (emit-flag "scheme_thing:")
   (emit "mov rsi, scheme_heap")
-  (emit-expr x 8 '()) ; 8 so we don't overwrite the return pointer
+  ;(emit-expr x 8 '()) ; 8 so we don't overwrite the return pointer
+  ;(emit (gen-labels x))
+  (pretty (gen-labels (transform-lambdas x) '()))
+  ;(pretty (transform-lambdas x) '())
   (emit "ret"))
 
 ;(compile-program '(+ 2 (- (+ 40 40) 40)))
@@ -287,9 +389,31 @@
 ;       (cons 1 2)
 ;       2)))
 
-(compile-program
-  '(let ((foo (cons 1 (cons 2 ())))
-         (bar (cons 3 (cons 4 ()))))
-     (cdr (cons foo bar))
-     ))
+;(compile-program
+;  '(let ((foo (cons 1 (cons 2 ())))
+;         (bar (cons 3 (cons 4 ()))))
+;
+;     (let ((baz (cons foo bar)))
+;       (cons baz baz))))
   ;'(cdr (cons (cons 1 (cons 2 ())) (cons 3 (cons 4 ())))))
+
+(compile-program
+  '(let ((x 10)
+         (double
+           (lambda (y) (+ y y)))
+
+         (curry
+           (lambda (x)
+             (lambda (y)
+               (lambda ()
+                 (+ x y))
+               ))))
+
+    (square 10)
+    ((curry 5) 6)))
+
+;(compile-program
+;  '(let ((x 5))
+;     (lambda (y)
+;       (lambda ()
+;         (+ x y)))))

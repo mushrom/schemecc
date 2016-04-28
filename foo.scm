@@ -31,6 +31,11 @@
 (define call-regs
   '(rdi rsi rdx rcx r8 r9))
 
+(define wordsize 8)
+
+(define (pointer-index n)
+  (* n wordsize))
+
 (define (immediate? x)
   (or (integer? x)
       (null? x)
@@ -39,7 +44,8 @@
 (define (primcall? x)
   (and (list? x)
        (not (null? x))
-       (member? (car x) '(add1 + - < > = cons car cdr))))
+       (member? (car x) '(add1 + - < > = cons car cdr
+                          stack-ref closure-ref))))
 
 (define (let? x)
   (and (list? x)
@@ -71,6 +77,16 @@
 
 (define (primcall-op-2 x)
   (caddr x))
+
+(define (closure-free closure)
+  (if (null? closure)
+    '()
+    (caddr closure)))
+
+(define (closure-vars closure)
+  (if (null? closure)
+    '()
+    (cadr closure)))
 
 (define (immediate-rep x)
   (cond ((integer? x) (shift-left x 2))
@@ -116,11 +132,11 @@
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-jl L0)
 
-       (emit "mov eax, " (immediate-rep #f))
+       (emit "mov rax, " (immediate-rep #f))
        (emit-jmp L1)
 
        (emit-label L0)
-       (emit "mov eax, " (immediate-rep #t))
+       (emit "mov rax, " (immediate-rep #t))
 
        (emit-label L1)))
 
@@ -134,11 +150,11 @@
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-jg L0)
 
-       (emit "mov eax, " (immediate-rep #f))
+       (emit "mov rax, " (immediate-rep #f))
        (emit-jmp L1)
 
        (emit-label L0)
-       (emit "mov eax, " (immediate-rep #t))
+       (emit "mov rax, " (immediate-rep #t))
 
        (emit-label L1)))
 
@@ -152,11 +168,11 @@
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-je L0)
 
-       (emit "mov eax, " (immediate-rep #f))
+       (emit "mov rax, " (immediate-rep #f))
        (emit-jmp L1)
 
        (emit-label L0)
-       (emit "mov eax, " (immediate-rep #t))
+       (emit "mov rax, " (immediate-rep #t))
 
        (emit-label L1)))
 
@@ -165,9 +181,9 @@
        (emit "mov [rsp - " sindex "], rax")
        (emit-expr (primcall-op-1 x) (+ sindex 8) env)
 
-       (emit "mov [esi], rax")
+       (emit "mov [rsi], rax")
        (emit "mov rax, [rsp - " sindex "]" )
-       (emit "mov [esi+8], rax")
+       (emit "mov [rsi+8], rax")
        (emit "mov rax, rsi")
        (emit "or rax, 1")
        (emit "add rsi, 16"))
@@ -182,6 +198,14 @@
        (emit "and rax, ~7")
        (emit "add rax, 8")
        (emit "mov rax, [rax]"))
+
+      ((eq? op 'closure-ref)
+       (emit "mov rdx, [rsp - 8]")
+       (emit "and rdx, ~0b110")
+       (emit "mov rax, [rdx + " (pointer-index (+ (primcall-op-1 x) 1)) "]"))
+
+      ((eq? op 'stack-ref)
+       (emit "mov rax, [rsp - " (pointer-index (+ 2 (primcall-op-1 x))) "]"))
 
       (true 'asdf))))
 
@@ -207,13 +231,13 @@
     (emit-comment b* " " sindex " " new-env)
     (cond
       ((null? b*)
-       (emit-comment "got here, " body)
+       ;(emit-comment "got here, " body)
        (emit-expr body sindex new-env))
 
       (true
         (let ((b (car b*)))
           (emit-expr (cadr b) sindex env)
-          (emit "mov [rsp - " sindex "], eax")
+          (emit "mov [rsp - " sindex "], rax")
           (f (cdr b*)
              (extend-env (car b) sindex new-env)
              (+ sindex 8))))))
@@ -250,7 +274,50 @@
 
     (emit-label L1)))
 
+(define (emit-closure x sindex env)
+  (define (iter x cindex)
+    (when (not (null? x))
+      (emit-primitive-call (car x) sindex env)
+      (emit "mov [rsi + " (pointer-index (+ cindex 1)) "], rax")
+      (iter (cdr x) (+ cindex 1))))
+
+  (emit-comment "making closure for " (cadr x)
+                ", capturing " (cddr x))
+
+  (emit "mov rax, " (apply values (cadr x)))
+  (emit "mov [rsi], rax")
+  (iter (cddr x) 0)
+  (emit "mov rax, rsi")
+  (emit "or rax, 0b110")
+  (emit "add rsi, " (+ wordsize (* wordsize (length (cddr x))))))
+
+(define (emit-funcall x sindex env)
+  ;(define old-sindex sindex)
+  (define args-stack-pos 3)
+  
+  (define (args-iter args i)
+    (when (not (null? args))
+      ;(set! new-sindex (+ 1 new-sindex))
+      (emit-expr (car args) (+ sindex (pointer-index i)) env)
+      (emit "mov [rsp - " (+ sindex (pointer-index i)) "], rax")
+      (args-iter (cdr args) (+ i 1))))
+
+  (emit-comment "operator: " (car x))
+  (emit-expr (car x) sindex env)
+  (emit "mov rdi, rax")
+  (args-iter (cdr x) args-stack-pos)
+
+  (emit-comment "stack index: " sindex)
+  (emit "sub rsp, " sindex)
+  (emit "mov [rsp - 16], rdi")
+  (emit "and rdi, ~0b110")
+  (emit "mov rdi, [rdi]")
+  (emit "call rdi")
+  (emit "mov rdi, [rsp - 16]")
+  (emit "add rsp, " sindex))
+
 (define (emit-expr x sindex env)
+  (emit-comment "expression: " x)
   (cond
     ((immediate? x)
      (emit-comment "immediate " x)
@@ -272,9 +339,10 @@
      (emit-primitive-call x sindex env))
 
     ((closure? x)
-     (emit-comment "making closure for " (cadr x)
-                   ", capturing " (cddr x))
-     )
+     (emit-closure x sindex env))
+
+    ((list? x)
+     (emit-funcall x sindex env))
 
     (true (print "wut"))))
 
@@ -286,8 +354,8 @@
 
 (define (emit-label-code x labels)
   (emit-label (car x))
-  (emit-expr (label-code-body x) 8 '())
-  )
+  (emit-expr (label-code-body x) 16 '())
+  (emit "ret"))
 
 (define (emit-labels x labels)
   (when (not (null? x))
@@ -298,8 +366,23 @@
 (define (emit-program x)
   (if (labels? x)
     (begin
+      (emit-flag "bits 64")
+      (emit-flag "extern scheme_heap")
+      (emit-flag "global scheme_thing")
+      (emit-flag "scheme_thing:")
+      (emit "mov rsi, scheme_heap")
+
+      ; emit main program code
+      (emit-flag ".scheme_entry:")
+      (emit-expr (caddr x) 16 '())
+      (emit "ret")
+
+      ; emit code for labels
+      (emit-flag ".scheme_labels:")
       (emit-labels (cadr x) (cadr x))
-      (emit-expr (caddr x) 8 '()))
+
+      )
+
     (emit "somethings wrong, expected a program with labels but got " x)))
 
 (define (lambda? x)
@@ -411,16 +494,6 @@
 
   (list-index-loop obj xs 0))
 
-(define (closure-free closure)
-  (if (null? closure)
-    '()
-    (caddr closure)))
-
-(define (closure-vars closure)
-  (if (null? closure)
-    '()
-    (cadr closure)))
-
 (define (resolve-var-refs x closure env)
   (cond
     ((null? x) '())
@@ -441,7 +514,8 @@
           (resolve-var-refs (cddr x) closure
                             (append env (map car (bindings x)))))))
 
-    ((primcall? x)
+    ((or (primcall? x)
+         (if? x))
      (cons (car x)
            (resolve-var-refs (cdr x) closure env)))
 
@@ -454,6 +528,7 @@
         (list 'closure-ref (list-index x (closure-free closure))))
 
        (true
+         (emit-comment "didn't find " x ". (todo: error out here)")
          'unfound-variable)))
 
     ((list? x)
@@ -480,20 +555,15 @@
 (load! "pretty.scm")
 
 (define (compile-program x)
-  (emit-flag "bits 64")
-  (emit-flag "extern scheme_heap")
-  (emit-flag "global scheme_thing")
-  (emit-flag "scheme_thing:")
-  (emit "mov rsi, scheme_heap")
   ;(emit-expr x 8 '() '()) ; 8 so we don't overwrite the return pointer
   ;(emit (gen-labels x))
   ;(pretty (gen-labels (transform-lambdas x) '()))
-  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
   ;(pretty (transform-lambdas x) '())
   ;(emit-expr (gen-labels (transform-lambdas x) '()) 8 '() '())
   ;(emit-program (gen-labels (transform-lambdas x) '()))
+  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
   (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
-  (emit "ret"))
+  )
 
 ;(compile-program '(+ 2 (- (+ 40 40) 40)))
 ;(compile-program
@@ -530,11 +600,21 @@
                  (+ x y))
                ))))
 
-     (double
-       (((curry x) 20)))))
+     (double (((curry x) 10)))))
+
+;(compile-program
+;  '(let ((x 10)
+;         (double
+;           (lambda (y) (+ y y))))
+;
+;     (double 10)))
 
 ;(compile-program
 ;  '(let ((x 5))
-;     (lambda (y)
-;       (lambda ()
-;         (+ x y)))))
+;     (((lambda (y)
+;         (lambda ()
+;           (+ x y))) 10))))
+
+;(compile-program
+;  '(let ((double (lambda (x) (lambda () (+ x x)))))
+;     ((double 21))))

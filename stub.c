@@ -7,6 +7,7 @@ enum {
 	SCM_TYPE_BOOLEAN    = 0x1f,
 	SCM_TYPE_EMPTY_LIST = 0x2f,
 	SCM_TYPE_PAIR       = 0x01,
+	SCM_TYPE_CLOSURE    = 0x06,
 
 	SCM_MASK_INTEGER = 0x3,
 	SCM_MASK_BOOLEAN = 0x7f,
@@ -33,6 +34,9 @@ void print_scheme_obj( uint64_t val ){
 		printf( " . " );
 		print_scheme_obj( *(thing + 1));
 		printf( ")" );
+
+	} else if (( val & SCM_MASK_HEAP ) == SCM_TYPE_CLOSURE ){
+		printf( "#<closure @ %p>", (void *)( val & ~SCM_MASK_HEAP ));
 	}
 }
 

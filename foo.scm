@@ -101,33 +101,33 @@
 
         (true "error: no immediate representation eh")))
 
-(define (emit-primitive-call x sindex env)
+(define (emit-primitive-call x sindex)
   (let ((op (primcall-op x)))
     (emit-comment "primcall " op ": " x)
 
     (cond
       ((eq? op 'add1)
-       (emit-expr (primcall-op-1 x) sindex env)
+       (emit-expr (primcall-op-1 x) sindex)
        (emit "add rax, " (immediate-rep 1)))
 
       ((eq? op '+)
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
        (emit "add rax, [rsp - " sindex "]"))
 
       ((eq? op '-)
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
        (emit "sub rax, [rsp - " sindex "]"))
 
       ((eq? op '<)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
 
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-jl L0)
@@ -143,9 +143,9 @@
       ((eq? op '>)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
 
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-jg L0)
@@ -161,9 +161,9 @@
       ((eq? op '=)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
 
        (emit "cmp rax, [rsp - " sindex "]")
        (emit-je L0)
@@ -177,9 +177,9 @@
        (emit-label L1)))
 
       ((eq? op 'cons)
-       (emit-expr (primcall-op-2 x) sindex env)
+       (emit-expr (primcall-op-2 x) sindex)
        (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8) env)
+       (emit-expr (primcall-op-1 x) (+ sindex 8))
 
        (emit "mov [rsi], rax")
        (emit "mov rax, [rsp - " sindex "]" )
@@ -189,12 +189,12 @@
        (emit "add rsi, 16"))
 
       ((eq? op 'car)
-       (emit-expr (primcall-op-1 x) sindex env)
+       (emit-expr (primcall-op-1 x) sindex)
        (emit "and rax, ~7")
        (emit "mov rax, [rax]"))
 
       ((eq? op 'cdr)
-       (emit-expr (primcall-op-1 x) sindex env)
+       (emit-expr (primcall-op-1 x) sindex)
        (emit "and rax, ~7")
        (emit "add rax, 8")
        (emit "mov rax, [rax]"))
@@ -209,40 +209,24 @@
 
       (true 'asdf))))
 
-(define (extend-env var sindex env)
-  (cons (list var sindex) env))
-
-(define (lookup x env)
-  (emit-comment "trying " x " at " env)
-  (cond ((null? env)
-         'not-found-sorry)
-
-        ((eq? (caar env) x)
-         (cadar env))
-
-        (true
-          (lookup x (cdr env)))))
-
 (define bindings cadr)
 (define body     caddr)
 
-(define (emit-let bindings body sindex env)
-  (define (f b* new-env sindex)
-    (emit-comment b* " " sindex " " new-env)
+(define (emit-let bindings body sindex)
+  (define (f b* sindex)
+    (emit-comment b* " " sindex)
     (cond
       ((null? b*)
-       ;(emit-comment "got here, " body)
-       (emit-expr body sindex new-env))
+       (emit-expr body sindex))
 
       (true
         (let ((b (car b*)))
-          (emit-expr (cadr b) sindex env)
+          (emit-expr (cadr b) sindex)
           (emit "mov [rsp - " sindex "], rax")
           (f (cdr b*)
-             (extend-env (car b) sindex new-env)
              (+ sindex 8))))))
   
-  (f bindings env sindex))
+  (f bindings sindex))
 
 (define (emit-cmp comp reg)
   (emit "cmp " reg ", " comp))
@@ -259,25 +243,25 @@
 (define (emit-jmp labelspec)
   (apply emit (cons "jmp " labelspec)))
 
-(define (emit-if test conseq altern sindex env)
+(define (emit-if test conseq altern sindex)
   (let ((L0 (unique-label))
         (L1 (unique-label)))
-    (emit-expr test sindex env)
+    (emit-expr test sindex)
     (emit-cmp (immediate-rep #f) 'rax)
     (emit-je L0)
 
-    (emit-expr conseq sindex env)
+    (emit-expr conseq sindex)
     (emit-jmp L1)
 
     (emit-label L0)
-    (emit-expr altern sindex env)
+    (emit-expr altern sindex)
 
     (emit-label L1)))
 
-(define (emit-closure x sindex env)
+(define (emit-closure x sindex)
   (define (iter x cindex)
     (when (not (null? x))
-      (emit-primitive-call (car x) sindex env)
+      (emit-primitive-call (car x) sindex)
       (emit "mov [rsi + " (pointer-index (+ cindex 1)) "], rax")
       (iter (cdr x) (+ cindex 1))))
 
@@ -291,19 +275,17 @@
   (emit "or rax, 0b110")
   (emit "add rsi, " (+ wordsize (* wordsize (length (cddr x))))))
 
-(define (emit-funcall x sindex env)
-  ;(define old-sindex sindex)
+(define (emit-funcall x sindex)
   (define args-stack-pos 3)
   
   (define (args-iter args i)
     (when (not (null? args))
-      ;(set! new-sindex (+ 1 new-sindex))
-      (emit-expr (car args) (+ sindex (pointer-index i)) env)
+      (emit-expr (car args) (+ sindex (pointer-index i)))
       (emit "mov [rsp - " (+ sindex (pointer-index i)) "], rax")
       (args-iter (cdr args) (+ i 1))))
 
   (emit-comment "operator: " (car x))
-  (emit-expr (car x) sindex env)
+  (emit-expr (car x) sindex)
   (emit "mov rdi, rax")
   (args-iter (cdr x) args-stack-pos)
 
@@ -316,7 +298,7 @@
   (emit "mov rdi, [rsp - 16]")
   (emit "add rsp, " sindex))
 
-(define (emit-expr x sindex env)
+(define (emit-expr x sindex)
   (emit-comment "expression: " x)
   (cond
     ((immediate? x)
@@ -325,24 +307,26 @@
 
     ((let? x)
      (emit-comment "got here")
-     (emit-let (bindings x) (body x) sindex env))
+     (emit-let (bindings x) (body x) sindex))
 
     ((if? x)
      (emit-comment "if " (cadr x))
-     (emit-if (cadr x) (caddr x) (caddr (cdr x)) sindex env))
+     (emit-if (cadr x) (caddr x) (caddr (cdr x)) sindex))
 
     ((variable? x)
-     (emit-comment "variable " x)
-     (emit "mov rax, [rsp - " (lookup x env) "]"))
+     (emit-comment "Got variable reference.")
+     (emit-comment "This shouldn't happen, should have been caught in var. ref pass" x)
+     (emit-comment "todo: error out here")
+     (emit "rawwwwwwwwwr!"))
 
     ((primcall? x)
-     (emit-primitive-call x sindex env))
+     (emit-primitive-call x sindex))
 
     ((closure? x)
-     (emit-closure x sindex env))
+     (emit-closure x sindex))
 
     ((list? x)
-     (emit-funcall x sindex env))
+     (emit-funcall x sindex))
 
     (true (print "wut"))))
 
@@ -354,7 +338,7 @@
 
 (define (emit-label-code x labels)
   (emit-label (car x))
-  (emit-expr (label-code-body x) 16 '())
+  (emit-expr (label-code-body x) (* wordsize 2))
   (emit "ret"))
 
 (define (emit-labels x labels)
@@ -374,13 +358,12 @@
 
       ; emit main program code
       (emit-flag ".scheme_entry:")
-      (emit-expr (caddr x) 16 '())
+      (emit-expr (caddr x) (* wordsize 2))
       (emit "ret")
 
       ; emit code for labels
       (emit-flag ".scheme_labels:")
       (emit-labels (cadr x) (cadr x))
-
       )
 
     (emit "somethings wrong, expected a program with labels but got " x)))
@@ -593,6 +576,9 @@
          (double
            (lambda (y) (+ y y)))
 
+         (add
+           (lambda (x y) (+ x y)))
+
          (curry
            (lambda (x)
              (lambda (y)
@@ -600,7 +586,9 @@
                  (+ x y))
                ))))
 
-     (double (((curry x) 10)))))
+     (if (< x 5)
+      (double (((curry x) 10)))
+      (add 20 22))))
 
 ;(compile-program
 ;  '(let ((x 10)

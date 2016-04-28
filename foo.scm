@@ -32,6 +32,7 @@
   '(rdi rsi rdx rcx r8 r9))
 
 (define wordsize 8)
+(define arg-stack-pos 2)
 
 (define (pointer-index n)
   (* n wordsize))
@@ -205,7 +206,7 @@
        (emit "mov rax, [rdx + " (pointer-index (+ (primcall-op-1 x) 1)) "]"))
 
       ((eq? op 'stack-ref)
-       (emit "mov rax, [rsp - " (pointer-index (+ 2 (primcall-op-1 x))) "]"))
+       (emit "mov rax, [rsp - " (pointer-index (+ arg-stack-pos (primcall-op-1 x))) "]"))
 
       (true 'asdf))))
 
@@ -276,7 +277,7 @@
   (emit "add rsi, " (+ wordsize (* wordsize (length (cddr x))))))
 
 (define (emit-funcall x sindex)
-  (define args-stack-pos 3)
+  (define new-stack-pos 3)
   
   (define (args-iter args i)
     (when (not (null? args))
@@ -287,7 +288,7 @@
   (emit-comment "operator: " (car x))
   (emit-expr (car x) sindex)
   (emit "mov rdi, rax")
-  (args-iter (cdr x) args-stack-pos)
+  (args-iter (cdr x) new-stack-pos)
 
   (emit-comment "stack index: " sindex)
   (emit "sub rsp, " sindex)
@@ -330,15 +331,20 @@
 
     (true (print "wut"))))
 
+;; code label -> code for the label
 (define (label-code-body x)
   (caddr (cdadr x)))
 
-(define (label-body x)
-  (caddr x))
+;; code label -> free var. list
+(define (label-code-free-vars x)
+  (cadr (cadr x)))
 
 (define (emit-label-code x labels)
+  (emit-comment (length (label-code-free-vars x)))
   (emit-label (car x))
-  (emit-expr (label-code-body x) (* wordsize 2))
+  (emit-expr (label-code-body x)
+             (pointer-index (+ arg-stack-pos
+                               (length (label-code-free-vars x)))))
   (emit "ret"))
 
 (define (emit-labels x labels)
@@ -358,13 +364,12 @@
 
       ; emit main program code
       (emit-flag ".scheme_entry:")
-      (emit-expr (caddr x) (* wordsize 2))
+      (emit-expr (caddr x) (pointer-index arg-stack-pos))
       (emit "ret")
 
       ; emit code for labels
       (emit-flag ".scheme_labels:")
-      (emit-labels (cadr x) (cadr x))
-      )
+      (emit-labels (cadr x) (cadr x)))
 
     (emit "somethings wrong, expected a program with labels but got " x)))
 

@@ -51,6 +51,16 @@
        (not (null? x))
        (eq? (car x) 'if)))
 
+(define (labels? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'labels)))
+
+(define (closure? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'closure)))
+
 (define variable? symbol?)
 
 (define (primcall-op x)
@@ -261,7 +271,36 @@
     ((primcall? x)
      (emit-primitive-call x sindex env))
 
+    ((closure? x)
+     (emit-comment "making closure for " (cadr x)
+                   ", capturing " (cddr x))
+     )
+
     (true (print "wut"))))
+
+(define (label-code-body x)
+  (caddr (cdadr x)))
+
+(define (label-body x)
+  (caddr x))
+
+(define (emit-label-code x labels)
+  (emit-label (car x))
+  (emit-expr (label-code-body x) 8 '())
+  )
+
+(define (emit-labels x labels)
+  (when (not (null? x))
+    (emit-comment "emitting " (car x))
+    (emit-label-code (car x) labels)
+    (emit-labels (cdr x) labels)))
+
+(define (emit-program x)
+  (if (labels? x)
+    (begin
+      (emit-labels (cadr x) (cadr x))
+      (emit-expr (caddr x) 8 '()))
+    (emit "somethings wrong, expected a program with labels but got " x)))
 
 (define (lambda? x)
   (and (list? x)
@@ -360,6 +399,84 @@
   (let ((new-body (replace-lambdas x)))
     (list 'labels labels new-body)))
 
+(define (list-index obj xs)
+  (define (list-index-loop obj xs count)
+    (cond
+      ((null? xs)
+        #f)
+      ((eq? (car xs) obj)
+        count)
+      (true
+        (list-index-loop obj (cdr xs) (+ count 1)))))
+
+  (list-index-loop obj xs 0))
+
+(define (closure-free closure)
+  (if (null? closure)
+    '()
+    (caddr closure)))
+
+(define (closure-vars closure)
+  (if (null? closure)
+    '()
+    (cadr closure)))
+
+(define (resolve-var-refs x closure env)
+  (cond
+    ((null? x) '())
+
+    ((closure? x)
+     (cons (car x)
+        (cons (cadr x)
+          (resolve-var-refs (cddr x) closure env))))
+
+    ((let? x)
+     (cons (car x)
+        (cons
+          (map (lambda (b)
+                 (cons (car b)
+                       (resolve-var-refs (cdr b) closure env)))
+               (cadr x))
+          ;(cadr x)
+          (resolve-var-refs (cddr x) closure
+                            (append env (map car (bindings x)))))))
+
+    ((primcall? x)
+     (cons (car x)
+           (resolve-var-refs (cdr x) closure env)))
+
+    ((variable? x)
+     (cond
+       ((member? x env)
+        (list 'stack-ref (list-index x env)))
+
+       ((member? x (closure-free closure))
+        (list 'closure-ref (list-index x (closure-free closure))))
+
+       (true
+         'unfound-variable)))
+
+    ((list? x)
+     (cons
+       (resolve-var-refs (car x) closure env)
+       (resolve-var-refs (cdr x) closure env)))
+
+    (true x)))
+
+(define (resolve-code-label-var-refs x)
+  (let ((code-def (cadr x)))
+    (list (car x)
+       (list (car code-def)
+             (cadr code-def)
+             (caddr code-def)
+             (resolve-var-refs (label-code-body x) code-def (cadr code-def))))))
+
+(define (resolve-labels-var-refs x)
+  (list
+    'labels
+    (map resolve-code-label-var-refs (cadr x))
+    (resolve-var-refs (caddr x) '() '())))
+
 (load! "pretty.scm")
 
 (define (compile-program x)
@@ -368,10 +485,14 @@
   (emit-flag "global scheme_thing")
   (emit-flag "scheme_thing:")
   (emit "mov rsi, scheme_heap")
-  ;(emit-expr x 8 '()) ; 8 so we don't overwrite the return pointer
+  ;(emit-expr x 8 '() '()) ; 8 so we don't overwrite the return pointer
   ;(emit (gen-labels x))
-  (pretty (gen-labels (transform-lambdas x) '()))
+  ;(pretty (gen-labels (transform-lambdas x) '()))
+  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
   ;(pretty (transform-lambdas x) '())
+  ;(emit-expr (gen-labels (transform-lambdas x) '()) 8 '() '())
+  ;(emit-program (gen-labels (transform-lambdas x) '()))
+  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
   (emit "ret"))
 
 ;(compile-program '(+ 2 (- (+ 40 40) 40)))
@@ -409,8 +530,8 @@
                  (+ x y))
                ))))
 
-    (square 10)
-    ((curry 5) 6)))
+     (double
+       (((curry x) 20)))))
 
 ;(compile-program
 ;  '(let ((x 5))

@@ -45,7 +45,7 @@
 (define (primcall? x)
   (and (list? x)
        (not (null? x))
-       (member? (car x) '(add1 + - < > = cons car cdr
+       (member? (car x) '(add1 + - < > = cons car cdr begin
                           stack-ref closure-ref))))
 
 (define (let? x)
@@ -208,20 +208,31 @@
       ((eq? op 'stack-ref)
        (emit "mov rax, [rsp - " (pointer-index (+ arg-stack-pos (primcall-op-1 x))) "]"))
 
+      ((eq? op 'begin)
+       (emit-comment (cdr x))
+       (emit-expr-list (cdr x) sindex))
+
       (true 'asdf))))
 
+(define (emit-expr-list xs sindex)
+  (when (not (null? xs))
+    (emit-comment "emitting next expression in list")
+    (emit-expr (car xs) sindex)
+    (emit-expr-list (cdr xs) sindex)))
+
 (define bindings cadr)
-(define body     caddr)
+(define body     cddr)
 
 (define (emit-let bindings body sindex)
   (define (f b* sindex)
     (emit-comment b* " " sindex)
     (cond
       ((null? b*)
-       (emit-expr body sindex))
+       (emit-expr-list body sindex))
 
       (true
         (let ((b (car b*)))
+          (emit-comment "binding " (car b) " => " (cadr b))
           (emit-expr (cadr b) sindex)
           (emit "mov [rsp - " sindex "], rax")
           (f (cdr b*)
@@ -301,13 +312,13 @@
 
 (define (emit-expr x sindex)
   (emit-comment "expression: " x)
+     (emit-comment "============================")
   (cond
     ((immediate? x)
      (emit-comment "immediate " x)
      (emit "mov rax, " (immediate-rep x)))
 
     ((let? x)
-     (emit-comment "got here")
      (emit-let (bindings x) (body x) sindex))
 
     ((if? x)
@@ -333,18 +344,18 @@
 
 ;; code label -> code for the label
 (define (label-code-body x)
-  (caddr (cdadr x)))
+  (cddr (cdadr x)))
 
 ;; code label -> free var. list
 (define (label-code-free-vars x)
   (cadr (cadr x)))
 
 (define (emit-label-code x labels)
-  (emit-comment (length (label-code-free-vars x)))
+  (emit-comment (label-code-body x))
   (emit-label (car x))
-  (emit-expr (label-code-body x)
-             (pointer-index (+ arg-stack-pos
-                               (length (label-code-free-vars x)))))
+  (emit-expr-list (label-code-body x)
+                  (pointer-index (+ arg-stack-pos
+                                    (length (label-code-free-vars x)))))
   (emit "ret"))
 
 (define (emit-labels x labels)
@@ -532,7 +543,10 @@
        (list (car code-def)
              (cadr code-def)
              (caddr code-def)
-             (resolve-var-refs (label-code-body x) code-def (cadr code-def))))))
+             (apply values
+                    (resolve-var-refs (label-code-body x)
+                                      code-def
+                                      (cadr code-def)))))))
 
 (define (resolve-labels-var-refs x)
   (list
@@ -582,7 +596,12 @@
            (lambda (y) (+ y y)))
 
          (add
-           (lambda (x y) (+ x y)))
+           (lambda (x y)
+             (begin
+               (+ (+ x x) y)
+               (+ (+ x x) y)
+               (+ (+ x x) y))
+             (+ x y)))
 
          (curry
            (lambda (x)
@@ -590,6 +609,8 @@
                (lambda ()
                  (+ x y))
                ))))
+
+     (+ x 1)
 
      (if (< x 5)
       (double (((curry x) 10)))

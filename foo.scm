@@ -296,10 +296,11 @@
       (emit "mov [rsp - " (+ sindex (pointer-index i)) "], rax")
       (args-iter (cdr args) (+ i 1))))
 
+  (args-iter (cdr x) new-stack-pos)
+
   (emit-comment "operator: " (car x))
   (emit-expr (car x) sindex)
   (emit "mov rdi, rax")
-  (args-iter (cdr x) new-stack-pos)
 
   (emit-comment "stack index: " sindex)
   (emit "sub rsp, " sindex)
@@ -612,9 +613,26 @@
 
      (+ x 1)
 
-     (if (< x 5)
+     (if (> x 5)
       (double (((curry x) 10)))
       (add 20 22))))
+
+;(compile-program
+;  '(let ((thing
+;           (lambda (f x y)
+;             (f x y)))
+;         (add
+;           (lambda (x y)
+;             (lambda ()
+;               (+ x y))))
+;
+;         (double
+;           (lambda (foo)
+;             (+ foo foo)))
+;
+;         (x 10))
+;
+;     (double ((thing add 1 2)))))
 
 ;(compile-program
 ;  '(let ((x 10)

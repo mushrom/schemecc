@@ -187,12 +187,12 @@
        (emit "mov [rsp - " sindex "], rax")
        (emit-expr (primcall-op-1 x) (+ sindex 8))
 
-       (emit "mov [rsi], rax")
+       (emit "mov [rbp], rax")
        (emit "mov rax, [rsp - " sindex "]" )
-       (emit "mov [rsi+8], rax")
-       (emit "mov rax, rsi")
+       (emit "mov [rbp+8], rax")
+       (emit "mov rax, rbp")
        (emit "or rax, 1")
-       (emit "add rsi, 16"))
+       (emit "add rbp, 16"))
 
       ((eq? op 'car)
        (emit-expr (primcall-op-1 x) sindex)
@@ -279,18 +279,18 @@
   (define (iter x cindex)
     (when (not (null? x))
       (emit-primitive-call (car x) sindex)
-      (emit "mov [rsi + " (pointer-index (+ cindex 1)) "], rax")
+      (emit "mov [rbp + " (pointer-index (+ cindex 1)) "], rax")
       (iter (cdr x) (+ cindex 1))))
 
   (emit-comment "making closure for " (cadr x)
                 ", capturing " (cddr x))
 
   (emit "mov rax, " (apply values (cadr x)))
-  (emit "mov [rsi], rax")
+  (emit "mov [rbp], rax")
   (iter (cddr x) 0)
-  (emit "mov rax, rsi")
+  (emit "mov rax, rbp")
   (emit "or rax, 0b110")
-  (emit "add rsi, " (+ wordsize (* wordsize (length (cddr x))))))
+  (emit "add rbp, " (+ wordsize (* wordsize (length (cddr x))))))
 
 (define (emit-funcall x sindex)
   (define new-stack-pos 3)
@@ -305,15 +305,15 @@
 
   (emit-comment "operator: " (car x))
   (emit-expr (car x) sindex)
-  (emit "mov rdi, rax")
+  (emit "mov rbx, rax")
 
   (emit-comment "stack index: " sindex)
   (emit "sub rsp, " sindex)
-  (emit "mov [rsp - 16], rdi")
-  (emit "and rdi, ~0b110")
-  (emit "mov rdi, [rdi]")
-  (emit "call rdi")
-  (emit "mov rdi, [rsp - 16]")
+  (emit "mov [rsp - 16], rbx")
+  (emit "and rbx, ~0b110")
+  (emit "mov rbx, [rbx]")
+  (emit "call rbx")
+  (emit "mov rbx, [rsp - 16]")
   (emit "add rsp, " sindex))
 
 (define (emit-foreign-call x sindex)
@@ -393,11 +393,15 @@
       (emit-flag "extern scheme_heap")
       (emit-flag "global scheme_thing")
       (emit-flag "scheme_thing:")
-      (emit "mov rsi, scheme_heap")
+      (emit "push rbp")
+      (emit "push rbx")
+      (emit "mov rbp, scheme_heap")
 
       ; emit main program code
       (emit-flag ".scheme_entry:")
       (emit-expr (caddr x) (pointer-index arg-stack-pos))
+      (emit "pop rbx")
+      (emit "pop rbp")
       (emit "ret")
 
       ; emit code for labels

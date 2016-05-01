@@ -431,6 +431,18 @@
 (define trans-lambda-body cdddr)
 (define trans-lambda-free caddr)
 
+(define (if-condition x)
+  (cadr x))
+
+(define (if-path-1 x)
+  (caddr x))
+
+(define (if-path-2 x)
+  (caddr (cdr x)))
+
+(define (if-expressions x)
+  (cdr x))
+
 (define (gen-free-vars x defined-vars)
   (cond
     ((null? x)
@@ -443,6 +455,9 @@
 
     ((primcall? x)
      (gen-free-vars (cdr x) defined-vars))
+
+    ((if? x)
+     (gen-free-vars (if-expressions x) defined-vars))
 
     ((foreign-call? x)
      (gen-free-vars (cddr x) defined-vars))
@@ -600,6 +615,7 @@
 (load! "pretty.scm")
 
 (define (compile-program x)
+  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
   (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
 
 ;; todo: remove this once proper ports are implemented in gojira
@@ -619,3 +635,4 @@
          (program (cons 'begin (read-program port))))
 
     (compile-program program)))
+    ;(pretty program)))

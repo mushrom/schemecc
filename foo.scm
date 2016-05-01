@@ -6,7 +6,7 @@
 (define (emit-comment :rest args)
   (display #\tab)
   (display "; ")
-  (for-each display args)
+  (for-each write args)
   (newline))
 
 (define (emit-flag :rest args)
@@ -40,7 +40,8 @@
 (define (immediate? x)
   (or (integer? x)
       (null? x)
-      (boolean? x)))
+      (boolean? x)
+      (char? x)))
 
 (define (primcall? x)
   (and (list? x)
@@ -104,6 +105,10 @@
          (if x
            #x9f
            #x1f))
+
+        ((char? x)
+         (+ (shift-left (char->integer x) 8)
+            #x0f))
 
         (true "error: no immediate representation eh")))
 
@@ -317,17 +322,19 @@
   (emit "add rsp, " sindex))
 
 (define (emit-foreign-call x sindex)
-  (define pop-regs '())
-
   (define (iter args regs)
     (when (and (not (null? args))
                (not (null? regs)))
       (emit-expr (car args) sindex)
-      (emit "mov " (car regs) ", rax")))
+      (emit-comment "next arg register: " (cdr regs))
+      (emit "mov " (car regs) ", rax")
+      (iter (cdr args) (cdr regs))))
 
   (iter (cddr x) call-regs)
   (emit-flag "extern " (primcall-op-1 x))
-  (emit "call " (primcall-op-1 x)) )
+  (emit "sub rsp, " sindex)
+  (emit "call " (primcall-op-1 x))
+  (emit "add rsp, " sindex))
 
 (define (emit-expr x sindex)
   (emit-comment "expression: " x)
@@ -357,7 +364,7 @@
      (emit-closure x sindex))
 
     ((foreign-call? x)
-     (emit-foreign-call x))
+     (emit-foreign-call x sindex))
 
     ((list? x)
      (emit-funcall x sindex))
@@ -434,6 +441,9 @@
 
     ((primcall? x)
      (gen-free-vars (cdr x) defined-vars))
+
+    ((foreign-call? x)
+     (gen-free-vars (cddr x) defined-vars))
 
     ((variable? x)
      (if (not (member? x defined-vars))
@@ -544,6 +554,11 @@
      (cons (car x)
            (resolve-var-refs (cdr x) closure env)))
 
+    ((foreign-call? x)
+     (cons 'foreign-call
+       (cons (cadr x)
+         (resolve-var-refs (cddr x) closure env))))
+
     ((variable? x)
      (cond
        ((member? x env)
@@ -616,31 +631,39 @@
 ;       (cons baz baz))))
   ;'(cdr (cons (cons 1 (cons 2 ())) (cons 3 (cons 4 ())))))
 
+;(compile-program
+;  '(let ((x (+ 5 5))
+;         (double
+;           (lambda (y) (+ y y)))
+;
+;         (add
+;           (lambda (x y)
+;             (begin
+;               (+ (+ x x) y)
+;               (+ (+ x x) y)
+;               (+ (+ x x) y))
+;             (+ x y)))
+;
+;         (curry
+;           (lambda (x)
+;             (lambda (y)
+;               (lambda ()
+;                 (+ x y))
+;               ))))
+;
+;     (+ x 1)
+;
+;     (if (> x 5)
+;      (double (((curry x) 10)))
+;      (add 20 22))))
+
 (compile-program
-  '(let ((x (+ 5 5))
-         (double
-           (lambda (y) (+ y y)))
-
-         (add
+  '(let ((thing
            (lambda (x y)
-             (begin
-               (+ (+ x x) y)
-               (+ (+ x x) y)
-               (+ (+ x x) y))
-             (+ x y)))
+             (foreign-call "s_write_char" x)
+             (foreign-call "s_write_char" y))))
 
-         (curry
-           (lambda (x)
-             (lambda (y)
-               (lambda ()
-                 (+ x y))
-               ))))
-
-     (+ x 1)
-
-     (if (> x 5)
-      (double (((curry x) 10)))
-      (add 20 22))))
+     (thing #\A #\newline)))
 
 ;(compile-program
 ;  '(let ((thing

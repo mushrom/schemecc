@@ -68,6 +68,11 @@
        (not (null? x))
        (eq? (car x) 'closure)))
 
+(define (foreign-call? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'foreign-call)))
+
 (define variable? symbol?)
 
 (define (primcall-op x)
@@ -311,6 +316,19 @@
   (emit "mov rdi, [rsp - 16]")
   (emit "add rsp, " sindex))
 
+(define (emit-foreign-call x sindex)
+  (define pop-regs '())
+
+  (define (iter args regs)
+    (when (and (not (null? args))
+               (not (null? regs)))
+      (emit-expr (car args) sindex)
+      (emit "mov " (car regs) ", rax")))
+
+  (iter (cddr x) call-regs)
+  (emit-flag "extern " (primcall-op-1 x))
+  (emit "call " (primcall-op-1 x)) )
+
 (define (emit-expr x sindex)
   (emit-comment "expression: " x)
      (emit-comment "============================")
@@ -337,6 +355,9 @@
 
     ((closure? x)
      (emit-closure x sindex))
+
+    ((foreign-call? x)
+     (emit-foreign-call x))
 
     ((list? x)
      (emit-funcall x sindex))
@@ -592,7 +613,7 @@
   ;'(cdr (cons (cons 1 (cons 2 ())) (cons 3 (cons 4 ())))))
 
 (compile-program
-  '(let ((x 10)
+  '(let ((x (+ 5 5))
          (double
            (lambda (y) (+ y y)))
 

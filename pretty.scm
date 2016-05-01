@@ -37,7 +37,7 @@
        else
         '())
 
-      (display xs)))
+      (write xs)))
   
   (pretty-set-current xs))
 

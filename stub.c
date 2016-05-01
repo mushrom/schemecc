@@ -9,6 +9,7 @@ enum {
 	SCM_TYPE_CHAR       = 0x0f,
 	SCM_TYPE_PAIR       = 0x01,
 	SCM_TYPE_CLOSURE    = 0x06,
+	SCM_TYPE_VECTOR     = 0x02,
 
 	SCM_MASK_INTEGER = 0x3,
 	SCM_MASK_BOOLEAN = 0x7f,
@@ -62,6 +63,25 @@ void print_scheme_obj( scm_data val ){
 
 	} else if (( val & SCM_MASK_HEAP ) == SCM_TYPE_CLOSURE ){
 		printf( "#<closure @ %p>", (void *)( val & ~SCM_MASK_HEAP ));
+
+	} else if (( val & SCM_MASK_HEAP ) == SCM_TYPE_VECTOR ){
+		scm_data *vecptr = (void *)( val & ~SCM_MASK_HEAP );
+		unsigned veclen = unshift_fixnum( *vecptr );
+		unsigned i = 0;
+
+		//printf( "#<vector @ %p, len = %u>", vecptr, unshift_fixnum( *vecptr ));
+
+		printf( "#(" );
+
+		for ( i = 0; i < veclen; i++ ){
+			print_scheme_obj( *(vecptr + i + 1));
+
+			if ( i + 1 < veclen ){
+				putchar( ' ' );
+			}
+		}
+
+		putchar( ')' );
 	}
 }
 

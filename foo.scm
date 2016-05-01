@@ -49,6 +49,7 @@
   (and (list? x)
        (not (null? x))
        (member? (car x) '(add1 + - < > = cons car cdr begin
+                          vector vector-ref vector-set!
                           stack-ref closure-ref))))
 
 (define (let? x)
@@ -86,6 +87,9 @@
 
 (define (primcall-op-2 x)
   (caddr x))
+
+(define (primcall-op-3 x)
+  (caddr (cdr x)))
 
 (define (closure-free closure)
   (if (null? closure)
@@ -223,6 +227,53 @@
       ((eq? op 'begin)
        (emit-comment (cdr x))
        (emit-expr-list (cdr x) sindex))
+
+      ((eq? op 'vector)
+       (emit-comment "making vector")
+
+       (let ((veclen (length (cdr x))))
+         (define (loopy args i)
+           (when (not (null? args))
+             (emit-expr (car args) sindex)
+             (emit "mov [rbp + " (pointer-index i) "], rax")
+             (loopy (cdr args) (+ i 1))))
+
+         (emit "mov rax, " (immediate-rep veclen))
+         (emit "mov [rbp], rax")
+         (loopy (cdr x) 1)
+         (emit "mov rax, rbp")
+         (emit "or rax, 0b010")
+         (emit "add rbp, " (pointer-index (+ 1 veclen)))))
+
+       ((eq? op 'vector-ref)
+        ; todo: add length checking and error out when appropriate
+        (emit-expr (primcall-op-2 x) sindex)
+        (emit "mov [rsp - " sindex "], rax")
+        (emit-expr (primcall-op-1 x) sindex)
+
+        (emit "mov rdx, [rsp - " sindex "]")
+        (emit "shl rdx, 1") ; numbers are already the number multiplied by 4, so
+                            ; we can shift left by one to make it multiplied by 8
+        (emit "and rax, ~0b010")
+        (emit "mov rax, [rax + rdx + 8]"))
+
+       ((eq? op 'vector-set!)
+        (emit-expr (primcall-op-2 x) sindex)
+        (emit "mov [rsp - " sindex "], rax")
+
+        (emit-expr (primcall-op-3 x) (+ sindex wordsize))
+        (emit "mov [rsp - " (+ sindex wordsize) "], rax")
+
+        (emit-expr (primcall-op-1 x) (+ sindex wordsize wordsize))
+
+        (emit "mov rdx, [rsp - " sindex "]")
+        (emit "mov [rsp - " sindex "], rax")
+        (emit "shl rdx, 1")
+        (emit "add rdx, rax")
+        (emit "and rdx, ~0b010")
+        (emit "mov rax, [rsp - " (+ sindex wordsize) "]")
+        (emit "mov [rdx + 8], rax")
+        (emit "mov rax, [rsp - " sindex "]"))
 
       (true 'asdf))))
 
@@ -634,5 +685,5 @@
   (let* ((port (open filename "r"))
          (program (cons 'begin (read-program port))))
 
+    ;(pretty program)
     (compile-program program)))
-    ;(pretty program)))

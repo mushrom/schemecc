@@ -26,7 +26,7 @@ all: stub.o $(TESTPROG)
 
 stub.o: stub.c
 
-$(TESTPROG): stub.o
+$(TESTPROG): stub.o foo.scm
 
 clean-tests:
 	@-echo "  > cleaning test output"

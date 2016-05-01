@@ -1,3 +1,5 @@
+#!/usr/bin/env gojira
+
 (define (emit :rest args)
   (display #\tab)
   (for-each display args)
@@ -598,103 +600,22 @@
 (load! "pretty.scm")
 
 (define (compile-program x)
-  ;(emit-expr x 8 '() '()) ; 8 so we don't overwrite the return pointer
-  ;(emit (gen-labels x))
-  ;(pretty (gen-labels (transform-lambdas x) '()))
-  ;(pretty (transform-lambdas x) '())
-  ;(emit-expr (gen-labels (transform-lambdas x) '()) 8 '() '())
-  ;(emit-program (gen-labels (transform-lambdas x) '()))
-  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
-  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '())))
-  )
+  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
 
-;(compile-program '(+ 2 (- (+ 40 40) 40)))
-;(compile-program
-;  '(let ((x 20)
-;         (y 60))
-;     (let ((x (+ x y))
-;           (y 20))
-;       (- (+ x y) 38))))
+;; todo: remove this once proper ports are implemented in gojira
+(define (eof-object? x)
+  (eq? x #f))
 
-;(compile-program
-;  '(let ((x 21)
-;         (y 20))
-;     (if (> x y)
-;       (cons 1 2)
-;       2)))
+(define (read-program port)
+  (let ((buf (read port)))
+    (if (not (eof-object? buf))
+      (cons buf (read-program port))
+      '())))
 
-;(compile-program
-;  '(let ((foo (cons 1 (cons 2 ())))
-;         (bar (cons 3 (cons 4 ()))))
-;
-;     (let ((baz (cons foo bar)))
-;       (cons baz baz))))
-  ;'(cdr (cons (cons 1 (cons 2 ())) (cons 3 (cons 4 ())))))
+; program entry
+(with *arguments* as (filename)
+  (emit-comment "compiling " filename)
+  (let* ((port (open filename "r"))
+         (program (cons 'begin (read-program port))))
 
-;(compile-program
-;  '(let ((x (+ 5 5))
-;         (double
-;           (lambda (y) (+ y y)))
-;
-;         (add
-;           (lambda (x y)
-;             (begin
-;               (+ (+ x x) y)
-;               (+ (+ x x) y)
-;               (+ (+ x x) y))
-;             (+ x y)))
-;
-;         (curry
-;           (lambda (x)
-;             (lambda (y)
-;               (lambda ()
-;                 (+ x y))
-;               ))))
-;
-;     (+ x 1)
-;
-;     (if (> x 5)
-;      (double (((curry x) 10)))
-;      (add 20 22))))
-
-(compile-program
-  '(let ((thing
-           (lambda (x y)
-             (foreign-call "s_write_char" x)
-             (foreign-call "s_write_char" y))))
-
-     (thing #\A #\newline)))
-
-;(compile-program
-;  '(let ((thing
-;           (lambda (f x y)
-;             (f x y)))
-;         (add
-;           (lambda (x y)
-;             (lambda ()
-;               (+ x y))))
-;
-;         (double
-;           (lambda (foo)
-;             (+ foo foo)))
-;
-;         (x 10))
-;
-;     (double ((thing add 1 2)))))
-
-;(compile-program
-;  '(let ((x 10)
-;         (double
-;           (lambda (y) (+ y y))))
-;
-;     (double 10)))
-
-;(compile-program
-;  '(let ((x 5))
-;     (((lambda (y)
-;         (lambda ()
-;           (+ x y))) 10))))
-
-;(compile-program
-;  '(let ((double (lambda (x) (lambda () (+ x x)))))
-;     ((double 21))))
+    (compile-program program)))

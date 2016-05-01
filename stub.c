@@ -69,7 +69,7 @@ int main( int argc, char *argv[] ){
 	scheme_heap = malloc( 4096 * 32 );
 	uint64_t val = scheme_thing( );
 
-	printf( "debug: val = 0x%x (%d)\n", val, val );
+	//printf( "debug: val = 0x%x (%d)\n", val, val );
 	print_scheme_obj( val );
 	printf( "\n" );
 

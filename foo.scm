@@ -21,9 +21,18 @@
   (newline))
 
 (define *cur-label* 0)
+(define *cur-temp* 0)
+
 (define (unique-label)
   (set! *cur-label* (+ *cur-label* 1))
   (list ".label" *cur-label*))
+
+(define (unique-temp-var)
+  (set! *cur-temp* (+ *cur-temp* 1))
+  (string->symbol
+    (string-append
+      "temp"
+      (number->string *cur-temp*))))
 
 (define (shift-left x amount)
   (if (> amount 0)
@@ -76,6 +85,11 @@
   (and (list? x)
        (not (null? x))
        (eq? (car x) 'foreign-call)))
+
+(define (set!? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'set!)))
 
 (define variable? symbol?)
 
@@ -494,6 +508,10 @@
 (define (if-expressions x)
   (cdr x))
 
+(define (p-debug x)
+  (print x)
+  x)
+
 (define (gen-free-vars x defined-vars)
   (cond
     ((null? x)
@@ -502,7 +520,7 @@
     ((let? x)
      (gen-free-vars
        (body x)
-       (append (map car (cdr x)) defined-vars)))
+       (append (map car (cadr x)) defined-vars)))
 
     ((primcall? x)
      (gen-free-vars (cdr x) defined-vars))
@@ -663,11 +681,194 @@
     (map resolve-code-label-var-refs (cadr x))
     (resolve-var-refs (caddr x) '() '())))
 
+(define (list-remove obj xs)
+  (cond
+    ((null? xs) '())
+
+    ((eq? obj (car xs))
+     (list-remove obj (cdr xs)))
+
+    (true
+      (if (list? (car xs))
+        (cons (list-remove obj (car xs))
+              (list-remove obj (cdr xs)))
+       else
+        (cons (car xs)
+              (list-remove obj (cdr xs)))))))
+
+(define (list-remove-objs objxs xs)
+  (cond
+    ((or (null? objxs)
+         (null? xs))
+     xs)
+
+    (true
+      (list-remove (car objxs)
+        (list-remove-objs (cdr objxs) xs)))))
+
+(define (list-replace* old new xs)
+  (cond
+    ((null? xs) '())
+
+    ((eq? old (car xs))
+     (cons new (list-replace* old new (cdr xs))))
+
+    (true
+      (if (list? (car xs))
+        (cons (list-replace* old new (car xs))
+              (list-replace* old new (cdr xs)))
+       else
+        (cons (car xs)
+              (list-replace* old new (cdr xs)))))))
+
+(define (list-replace-objs* objxs xs)
+  (cond
+    ((or (null? objxs)
+         (null? xs))
+     xs)
+
+    (true
+      (list-replace* (caar objxs) (cadar objxs)
+        (list-replace-objs* (cdr objxs) xs)))))
+
+(define (intersect xs ys)
+  (let ((foo (append xs ys)))
+    (filter (lambda (x)
+              (and (member? x xs)
+                   (member? x ys)))
+            foo)))
+
+(define (remove-repeat xs)
+  (if (null? xs)
+    '()
+    (let ((next (remove-repeat (cdr xs))))
+      (if (member? (car xs) next)
+        next
+        (cons (car xs) next)))))
+
+(define (expand fun iter data)
+  (cond
+    ((null? iter)
+     data)
+
+    (true
+      (fun (car iter)
+           (expand fun (cdr iter) data)))))
+
+(define (construct-lambda args body)
+  (cons 'lambda
+    (cons args body)))
+
+(define (construct-let binds body)
+  (cons 'let
+    (cons binds body)))
+
+(define (construct-vector-set vec index value)
+  (cons 'vector-set!
+    (cons vec
+      (cons index
+        (cons value '())))))
+
+(define (construct-vector-ref vec index)
+  (cons 'vector-ref
+    (cons vec
+      (cons index '()))))
+
+(define (replace-assignments x vars)
+  (cond
+    ((null? x)
+     '())
+
+    ((and (variable? x)
+          (member? x vars))
+     (construct-vector-ref x 0))
+
+    ((set!? x)
+     (construct-vector-set
+       (primcall-op-1 x) 0 (primcall-op-2 x)))
+
+    ((list? x)
+      (cons
+        (replace-assignments (car x) vars)
+        (replace-assignments (cdr x) vars)))
+
+    (true x)))
+
+(define (transform-assignments x)
+  (cond
+    ((null? x)
+     (list '() '()))
+
+    ((lambda? x)
+     (let* ((assigns    (transform-assignments (lambda-body x)))
+            (found-vars (remove-repeat (intersect (lambda-args x) (car assigns))))
+            (var-pairs  (map (lambda (x)
+                               (list x (unique-temp-var)))
+                             found-vars)))
+
+       (for arg in (lambda-args x)
+          (when (member? arg (car assigns))
+            (emit-comment "lambda has assignment statement for argument " arg " in it's body")))
+
+       (define (insert-lets vars xs)
+         (emit-comment "replacing " vars)
+         (list (construct-let
+           (list (list (car vars) (list 'vector (cadr vars))))
+           xs)))
+
+       ;assigns
+       (list
+         (list-remove-objs (lambda-args x) (car assigns))
+         (construct-lambda
+           (list-replace-objs* var-pairs (lambda-args x))
+           (expand insert-lets
+                   var-pairs
+                   (replace-assignments (lambda-body x) (car assigns)))))))
+
+    ((let? x)
+     (let* ((left  (transform-assignments (bindings x)))
+            (right (transform-assignments (body x)))
+            (assigns (append
+                       (car left)
+                       (car right))))
+
+       (for (key value) in (bindings x)
+          (when (member? key assigns)
+            (emit-comment "let has assignment statement for binding " key " in it's body")))
+
+       (list
+         (list-remove-objs (map car (bindings x)) assigns)
+         (construct-let
+           (cadr left)
+           (cadr right)))))
+
+    ((set!? x)
+     (list (list (cadr x))
+                 (caddr x)))
+
+    ((list? x)
+     (let ((left  (transform-assignments (car x)))
+           (right (transform-assignments (cdr x))))
+
+       (list
+         (append
+           (car left)
+           (car right))
+
+         (cons
+           (cadr left)
+           (cadr right)))))
+
+    (true (list '() x))))
+
 (load! "pretty.scm")
 
 (define (compile-program x)
+  ;(pretty (cadr (transform-assignments x))))
   ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
-  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
+  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr (transform-assignments x))) '()))))
+  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr (transform-assignments x))) '()))))
+  ;(emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)

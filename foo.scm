@@ -863,12 +863,30 @@
 
 (load! "pretty.scm")
 
+(define error-port (open "/dev/stderr" "w"))
+
+(define (error-print :rest x)
+  (display "ERROR: " error-port)
+  (for thing in x
+    (display thing error-port))
+  (display #\newline error-port))
+
 (define (compile-program x)
-  ;(pretty (cadr (transform-assignments x))))
-  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
-  ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr (transform-assignments x))) '()))))
-  (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr (transform-assignments x))) '()))))
-  ;(emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas x) '()))))
+  (call/cc
+    (lambda (escape)
+      (let* ((assigned-vars (transform-assignments x)))
+        (if (null? (car assigned-vars))
+          (begin
+            (emit-program (resolve-labels-var-refs
+                            (gen-labels
+                              (transform-lambdas (cadr assigned-vars))
+                              '())))
+            'success)
+         else
+          (begin
+            (for remaining in (car assigned-vars)
+                 (error-print "set!: \"" remaining "\" is not defined, or not in scope of set!"))
+            (escape 'error)))))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)
@@ -887,4 +905,4 @@
          (program (cons 'begin (read-program port))))
 
     ;(pretty program)
-    (compile-program program)))
+    (emit-comment "compilation result: " (compile-program program))))

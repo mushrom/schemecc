@@ -779,6 +779,12 @@
     (cons vec
       (cons index '()))))
 
+(define (construct-if condition path1 path2)
+  (list 'if condition path1 path2))
+
+(define (construct-begin :rest code)
+  (cons 'begin code))
+
 (define (change-let-binding name new-value binds)
   (when (not (null? binds))
     (emit-comment name " " (car binds)))
@@ -905,6 +911,11 @@
        (not (null? x))
        (eq? (car x) 'define)))
 
+(define (cond? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'cond)))
+
 (define (expand-define def-spec body)
   (let ((def-id    (cadr  def-spec))
         (def-value (cddr def-spec)))
@@ -938,6 +949,22 @@
        (true
          (error-print "invalid define specification")))))
 
+(define (expand-cond x)
+  (define (expand-cond-iter expr)
+    (cond
+       ((null? expr)
+        #f)
+
+       ((eq? (caar expr) 'else)
+        (apply construct-begin (cdar expr)))
+
+       (true
+         (construct-if (caar expr)
+            (apply construct-begin (cdar expr))
+            (expand-cond-iter (cdr expr))))))
+
+  (expand-cond-iter (cdr x)))
+
 (define (rewrite-core-syntax x)
   (cond
     ((null? x)
@@ -947,6 +974,9 @@
           (define? (car x)))
      (rewrite-core-syntax
        (expand-define (car x) (cdr x))))
+
+    ((cond? x)
+     (rewrite-core-syntax (expand-cond x)))
 
     ((list? x)
       (cons

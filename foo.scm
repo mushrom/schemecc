@@ -900,6 +900,61 @@
 
     (true (list '() x))))
 
+(define (define? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'define)))
+
+(define (expand-define def-spec body)
+  (let ((def-id    (cadr  def-spec))
+        (def-value (cddr def-spec)))
+
+    (cond
+       ((list? def-id)
+        (list
+          (construct-let
+            (list (construct-let-binding
+                    (car def-id)
+                    (construct-let
+                      (list (construct-let-binding (car def-id) #f))
+                      (list (list 'set! (car def-id)
+                                      (construct-lambda
+                                        (cdr def-id)
+                                        def-value))
+                            (car def-id)))))
+            body)))
+
+       ((variable? def-id)
+        (list
+          (construct-let
+            (list (construct-let-binding
+                    def-id
+                    (construct-let
+                      (list (construct-let-binding def-id #f))
+                      (list (list 'set! def-id (car def-value))
+                            def-id))))
+            body)))
+
+       (true
+         (error-print "invalid define specification")))))
+
+(define (rewrite-core-syntax x)
+  (cond
+    ((null? x)
+     '())
+
+    ((and (list? x)
+          (define? (car x)))
+     (rewrite-core-syntax
+       (expand-define (car x) (cdr x))))
+
+    ((list? x)
+      (cons
+        (rewrite-core-syntax (car x))
+        (rewrite-core-syntax (cdr x))))
+
+    (true x)))
+
 (load! "pretty.scm")
 
 (define error-port (open "/dev/stderr" "w"))
@@ -913,12 +968,15 @@
 (define (compile-program x)
   (call/cc
     (lambda (escape)
-      (let* ((assigned-vars (transform-assignments x)))
+      (let* ((expanded       (rewrite-core-syntax x))
+             (assigned-vars  (transform-assignments expanded)))
         (if (null? (car assigned-vars))
           (begin
             (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
             ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
             ;(pretty assigned-vars)
+            ;(pretty assigned-vars)
+            ;(pretty expanded)
             'success)
          else
           (begin

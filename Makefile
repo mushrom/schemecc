@@ -19,7 +19,7 @@ all: stub.o $(TESTPROG)
 	@$(CC) $(CFLAGS) -o $@ stub.o $<
 
 %.testout: %.progout
-	@./$< > $@
+	@-./$< 2>&1 > $@
 
 %.diff: %.testout
 	@-diff $*.expected $< > $@

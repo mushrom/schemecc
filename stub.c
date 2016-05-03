@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <string.h>
 
 enum {
 	SCM_TYPE_INTEGER    = 0x00,
@@ -86,7 +88,9 @@ void print_scheme_obj( scm_data val ){
 }
 
 int main( int argc, char *argv[] ){
-	scheme_heap = malloc( 4096 * 32 );
+	scheme_heap = sbrk( 0x1000 * 32 );
+	memset( scheme_heap, 0, 0x1000 * 32 );
+
 	uint64_t val = scheme_thing( );
 
 	//printf( "debug: val = 0x%x (%d)\n", val, val );

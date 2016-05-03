@@ -404,8 +404,8 @@
   (emit "add rsp, " sindex))
 
 (define (emit-expr x sindex)
-  (emit-comment "expression: " x)
-     (emit-comment "============================")
+  ;(emit-comment "expression: " x)
+  ;(emit-comment "============================")
   (cond
     ((immediate? x)
      (emit-comment "immediate " x)
@@ -731,13 +731,6 @@
       (list-replace* (caar objxs) (cadar objxs)
         (list-replace-objs* (cdr objxs) xs)))))
 
-(define (intersect xs ys)
-  (let ((foo (append xs ys)))
-    (filter (lambda (x)
-              (and (member? x xs)
-                   (member? x ys)))
-            foo)))
-
 (define (remove-repeat xs)
   (if (null? xs)
     '()
@@ -745,6 +738,12 @@
       (if (member? (car xs) next)
         next
         (cons (car xs) next)))))
+
+(define (intersect xs ys)
+  (filter (lambda (x)
+            (and (member? x xs)
+                 (member? x ys)))
+          xs))
 
 (define (expand fun iter data)
   (cond
@@ -763,6 +762,12 @@
   (cons 'let
     (cons binds body)))
 
+(define (construct-vector :rest args)
+  (cons 'vector args))
+
+(define (construct-let-binding name value)
+  (list name value))
+
 (define (construct-vector-set vec index value)
   (cons 'vector-set!
     (cons vec
@@ -773,6 +778,32 @@
   (cons 'vector-ref
     (cons vec
       (cons index '()))))
+
+(define (change-let-binding name new-value binds)
+  (when (not (null? binds))
+    (emit-comment name " " (car binds)))
+
+  (cond
+    ((null? binds)
+     '())
+
+    ((eq? name (caar binds))
+     (emit-comment "got here")
+     (cons
+       (construct-let-binding name new-value)
+       (change-let-binding name new-value (cdr binds))))
+
+    (true
+      (cons
+        (car binds)
+        (change-let-binding name new-value (cdr binds))))))
+
+(define (get-binding name binds)
+  (assq name binds))
+
+(define (vectorise-mutable-bindings var binds)
+  (let ((bind-data (get-binding var binds)))
+    (change-let-binding var (construct-vector bind-data) binds)))
 
 (define (replace-assignments x vars)
   (cond
@@ -785,7 +816,9 @@
 
     ((set!? x)
      (construct-vector-set
-       (primcall-op-1 x) 0 (primcall-op-2 x)))
+       (primcall-op-1 x)
+       0
+       (replace-assignments (primcall-op-2 x) vars)))
 
     ((list? x)
       (cons
@@ -794,6 +827,13 @@
 
     (true x)))
 
+(define (insert-lets vars xs)
+  (emit-comment "replacing " vars)
+  (list (construct-let
+      (list (list (car vars)
+                  (list 'vector (cadr vars))))
+      xs)))
+
 (define (transform-assignments x)
   (cond
     ((null? x)
@@ -801,7 +841,7 @@
 
     ((lambda? x)
      (let* ((assigns    (transform-assignments (lambda-body x)))
-            (found-vars (remove-repeat (intersect (lambda-args x) (car assigns))))
+            (found-vars (intersect (lambda-args x) (car assigns)))
             (var-pairs  (map (lambda (x)
                                (list x (unique-temp-var)))
                              found-vars)))
@@ -809,12 +849,6 @@
        (for arg in (lambda-args x)
           (when (member? arg (car assigns))
             (emit-comment "lambda has assignment statement for argument " arg " in it's body")))
-
-       (define (insert-lets vars xs)
-         (emit-comment "replacing " vars)
-         (list (construct-let
-           (list (list (car vars) (list 'vector (cadr vars))))
-           xs)))
 
        ;assigns
        (list
@@ -828,9 +862,8 @@
     ((let? x)
      (let* ((left  (transform-assignments (bindings x)))
             (right (transform-assignments (body x)))
-            (assigns (append
-                       (car left)
-                       (car right))))
+            (assigns (append (car left) (car right)))
+            (found-vars (intersect (map car (bindings x)) assigns)))
 
        (for (key value) in (bindings x)
           (when (member? key assigns)
@@ -839,13 +872,19 @@
        (list
          (list-remove-objs (map car (bindings x)) assigns)
          (construct-let
-           (cadr left)
-           (cadr right)))))
+           (expand vectorise-mutable-bindings
+                   found-vars
+                   (cadr left))
+           ;(cadr left)
+           (replace-assignments (cadr right) found-vars)))))
 
     ((set!? x)
-     (list (list (cadr x))
-                 (caddr x)))
-
+     (let ((set-body (transform-assignments (primcall-op-2 x))))
+       (list (list (primcall-op-1 x))
+             (cons 'set!
+                   (cons
+                     (primcall-op-1 x)
+                     (cdr set-body))))))
     ((list? x)
      (let ((left  (transform-assignments (car x)))
            (right (transform-assignments (cdr x))))
@@ -877,10 +916,9 @@
       (let* ((assigned-vars (transform-assignments x)))
         (if (null? (car assigned-vars))
           (begin
-            (emit-program (resolve-labels-var-refs
-                            (gen-labels
-                              (transform-lambdas (cadr assigned-vars))
-                              '())))
+            (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
+            ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
+            ;(pretty assigned-vars)
             'success)
          else
           (begin

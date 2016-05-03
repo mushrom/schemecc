@@ -16,7 +16,7 @@ all: stub.o $(TESTPROG)
 
 %.progout: %.o
 	@echo CC $< -o $@
-	@$(CC) -o $@ stub.o $<
+	@$(CC) $(CFLAGS) -o $@ stub.o $<
 
 %.testout: %.progout
 	@./$< > $@

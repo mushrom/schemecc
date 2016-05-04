@@ -1,5 +1,8 @@
 #!/usr/bin/env gojira
 
+;; XXX: compatibility with scheme cond and gojira's incomplete cond
+(define else #t)
+
 (define (emit :rest args)
   (display #\tab)
   (for-each display args)
@@ -90,6 +93,11 @@
   (and (list? x)
        (not (null? x))
        (eq? (car x) 'set!)))
+
+(define (library-definition? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'define-library)))
 
 (define variable? symbol?)
 
@@ -615,6 +623,43 @@
 
   (list-index-loop obj xs 0))
 
+(define (get-lib-field key lib)
+  (print lib)
+  (cond
+    ((null? lib)
+     #f)
+
+    ((eq? key (caar lib))
+      (cdr (car lib)))
+
+    (else
+      (get-lib-field key (cdr lib)))))
+
+(define (change-lib-field key new-value lib)
+  (p-debug (cond
+    ((null? lib)
+     '())
+
+    ((eq? key (caar lib))
+     (cons
+       (list key new-value)
+       (change-lib-field key new-value (cdr lib))))
+
+    (else
+      (cons
+        (car lib)
+        (change-lib-field key new-value (cdr lib)))))))
+
+(define (construct-library-definition name libspec)
+  (cons
+    'define-library
+    (cons
+      name
+      libspec)))
+
+(define (library-fields x)
+  (cddr x))
+
 (define (resolve-var-refs x closure env)
   (cond
     ((null? x) '())
@@ -656,6 +701,14 @@
        (true
          (emit-comment "didn't find " x ". (todo: error out here)")
          'unfound-variable)))
+
+    ((library-definition? x)
+     (print (library-fields x))
+     (construct-library-definition
+       (cadr x)
+       (change-lib-field 'begin
+         (resolve-var-refs (get-lib-field 'begin (library-fields x)) '() '())
+         (library-fields x))))
 
     ((list? x)
      (cons
@@ -1024,11 +1077,40 @@
       (cons buf (read-program port))
       '())))
 
-; program entry
-(with *arguments* as (filename)
-  (emit-comment "compiling " filename)
-  (let* ((port (open filename "r"))
-         (program (cons 'begin (read-program port))))
+(define (parse-args args)
+  (cond
+    ((null? args) '())
 
-    ;(pretty program)
-    (emit-comment "compilation result: " (compile-program program))))
+    ((eq? (string-ref (car args) 0) #\-)
+     (cons
+       (map list->string
+               (list-split (string->list (car args)) #\:))
+       (parse-args (cdr args))))
+
+    (else
+      (cons (car args)
+            (parse-args (cdr args))))))
+
+(define (argument-flags parsed)
+  (filter list? parsed))
+
+(define (argument-fields parsed)
+  (filter string? parsed))
+
+(define (arguments-contain-flag? flag args)
+  (member? flag (map car (argument-flags args))))
+
+; program entry
+(let ((args (parse-args *arguments*)))
+  (if (>= (length (argument-fields args)) 1)
+    ; TODO: handle actually outputing to different files
+    (for filename in (argument-fields args)
+      (emit-comment "compiling " filename)
+      (let* ((port (open filename "r"))
+             (program (cons 'begin (read-program port))))
+
+        ;(pretty program)
+        (emit-comment "compilation result: " (compile-program program))))
+
+  else
+    (error-print "Need filename to compile")))

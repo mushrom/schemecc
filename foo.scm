@@ -97,6 +97,11 @@
 (define (library-definition? x)
   (and (list? x)
        (not (null? x))
+       (eq? (car x) 'define-library-expanded)))
+
+(define (unexpanded-library-definition? x)
+  (and (list? x)
+       (not (null? x))
        (eq? (car x) 'define-library)))
 
 (define variable? symbol?)
@@ -122,6 +127,45 @@
   (if (null? closure)
     '()
     (cadr closure)))
+
+(define (get-lib-field key lib)
+  (cond
+    ((null? lib)
+     #f)
+
+    ((eq? key (caar lib))
+      (cdr (car lib)))
+
+    (else
+      (get-lib-field key (cdr lib)))))
+
+(define (change-lib-field key new-value lib)
+  (cond
+    ((null? lib)
+     '())
+
+    ((eq? key (caar lib))
+     (cons
+       (cons key new-value)
+       (change-lib-field key new-value (cdr lib))))
+
+    (else
+      (cons
+        (car lib)
+        (change-lib-field key new-value (cdr lib))))))
+
+(define (construct-library-definition name libspec)
+  (cons
+    'define-library-expanded
+    (cons
+      name
+      libspec)))
+
+(define (library-fields x)
+  (cddr x))
+
+(define (library-name x)
+  (cadr x))
 
 (define (immediate-rep x)
   (cond ((integer? x) (shift-left x 2))
@@ -411,6 +455,85 @@
   (emit "call " (primcall-op-1 x))
   (emit "add rsp, " sindex))
 
+(define (gen-library-sym name thing)
+  (string-concat (append (map (lambda (x)
+                                (string-append (symbol->string x) "_"))
+                              name)
+                         (list thing))))
+
+(define (emit-module-label name thing)
+  (emit-flag
+    (string-concat (append (map (lambda (x)
+                                  (string-append (symbol->string x) "_"))
+                                name)
+                           (list thing ":")))))
+
+(define (sanitize-module-sym sym)
+  (list->string
+    (list-remove-objs '(#\-)
+                     (string->list (symbol->string sym)))))
+
+(define (emit-library-set! x sindex)
+  (with x as (unused libname libsym value)
+     (emit-comment "library-set!: " libname " " libsym)
+     (emit-expr value sindex)
+     (emit "mov [" (gen-library-sym libname (sanitize-module-sym libsym)) "], rax")))
+
+(define (emit-library-ref x sindex)
+  (with x as (unused libname libsym)
+     (emit-comment "library-ref: " libname " " libsym)
+     (emit-flag "extern " (gen-library-sym libname (sanitize-module-sym libsym)))
+     (emit "mov rax, [" (gen-library-sym libname (sanitize-module-sym libsym)) "]")))
+
+(define (library-set!? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'library-set!)))
+
+(define (library-ref? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'library-ref)))
+
+(define (library-import? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'import)))
+
+(define (gen-library-file-name libname)
+  (gen-library-sym libname "lib.libstub"))
+
+(define (emit-library-definition x sindex)
+  (emit-comment "emitting library definition for " (library-name x))
+
+  (let ((exports (get-lib-field 'export (library-fields x)))
+        (libname (library-name x)))
+    (emit-comment exports)
+
+    (let ((stubfile (open (gen-library-file-name libname) "w")))
+      (write
+        (construct-library-definition
+          (library-name x)
+          (change-lib-field 'begin '(...) (library-fields x)))
+        stubfile)
+
+      (display #\newline stubfile))
+
+    (emit-flag "section .bss")
+
+    (when (not (null? exports))
+      (for sym in (car exports)
+         (emit-flag "global " (gen-library-sym libname (sanitize-module-sym sym)))
+         (emit-module-label libname (sanitize-module-sym sym))
+         (emit "resq " 1)))
+
+    (emit-flag "section .text")
+
+    (emit-flag "global " (gen-library-sym libname "lib"))
+    (emit-module-label (library-name x) "lib")
+    (emit-expr (car (get-lib-field 'begin (library-fields x))) sindex)
+    (emit "ret")))
+
 (define (emit-expr x sindex)
   ;(emit-comment "expression: " x)
   ;(emit-comment "============================")
@@ -440,6 +563,15 @@
 
     ((foreign-call? x)
      (emit-foreign-call x sindex))
+
+    ((library-definition? x)
+     (emit-library-definition x sindex))
+
+    ((library-set!? x)
+     (emit-library-set! x sindex))
+
+    ((library-ref? x)
+     (emit-library-ref x sindex))
 
     ((list? x)
      (emit-funcall x sindex))
@@ -485,6 +617,20 @@
       (emit "pop rbx")
       (emit "pop rbp")
       (emit "ret")
+
+      ; emit code for labels
+      (emit-flag ".scheme_labels:")
+      (emit-labels (cadr x) (cadr x)))
+
+    (emit "somethings wrong, expected a program with labels but got " x)))
+
+(define (emit-library x)
+  (if (labels? x)
+    (begin
+      (emit-flag "bits 64")
+
+      ; emit main library code
+      (emit-expr (caddr x) (pointer-index arg-stack-pos))
 
       ; emit code for labels
       (emit-flag ".scheme_labels:")
@@ -623,43 +769,6 @@
 
   (list-index-loop obj xs 0))
 
-(define (get-lib-field key lib)
-  (print lib)
-  (cond
-    ((null? lib)
-     #f)
-
-    ((eq? key (caar lib))
-      (cdr (car lib)))
-
-    (else
-      (get-lib-field key (cdr lib)))))
-
-(define (change-lib-field key new-value lib)
-  (p-debug (cond
-    ((null? lib)
-     '())
-
-    ((eq? key (caar lib))
-     (cons
-       (list key new-value)
-       (change-lib-field key new-value (cdr lib))))
-
-    (else
-      (cons
-        (car lib)
-        (change-lib-field key new-value (cdr lib)))))))
-
-(define (construct-library-definition name libspec)
-  (cons
-    'define-library
-    (cons
-      name
-      libspec)))
-
-(define (library-fields x)
-  (cddr x))
-
 (define (resolve-var-refs x closure env)
   (cond
     ((null? x) '())
@@ -703,12 +812,23 @@
          'unfound-variable)))
 
     ((library-definition? x)
-     (print (library-fields x))
      (construct-library-definition
        (cadr x)
-       (change-lib-field 'begin
+       (change-lib-field
+         'begin
          (resolve-var-refs (get-lib-field 'begin (library-fields x)) '() '())
          (library-fields x))))
+
+    ((library-set!? x)
+     (cons
+       (car x)
+       (cons
+         (cadr x)
+         (cons
+           (caddr x)
+           (resolve-var-refs (cddr (cdr x)) closure env)))))
+
+    ((library-ref? x) x)
 
     ((list? x)
      (cons
@@ -869,6 +989,8 @@
     ((null? x)
      '())
 
+    ((library-ref? x) x)
+
     ((and (variable? x)
           (member? x vars))
      (construct-vector-ref x 0))
@@ -897,6 +1019,8 @@
   (cond
     ((null? x)
      (list '() '()))
+
+    ((library-ref? x) (list '() x))
 
     ((lambda? x)
      (let* ((assigns    (transform-assignments (lambda-body x)))
@@ -944,6 +1068,7 @@
                    (cons
                      (primcall-op-1 x)
                      (cdr set-body))))))
+
     ((list? x)
      (let ((left  (transform-assignments (car x)))
            (right (transform-assignments (cdr x))))
@@ -1018,6 +1143,38 @@
 
   (expand-cond-iter (cdr x)))
 
+(define (expand-import x body)
+  (with x as (unused libname)
+    (let* ((stubfile (open (gen-library-file-name libname) "r"))
+           (lib      (read stubfile))
+           (exports  (car (get-lib-field 'export (library-fields lib)))))
+
+
+      (cons
+        (list 'foreign-call (gen-library-sym libname "lib"))
+
+        (append (map (lambda (sym)
+                       (list 'define sym (list 'library-ref libname sym)))
+                     exports)
+                body)))))
+
+(define (expand-library-definition x)
+  (let ((exports   (car (get-lib-field 'export (library-fields x))))
+        (libbody        (get-lib-field 'begin  (library-fields x))))
+
+    (construct-library-definition
+      (library-name x)
+      (change-lib-field
+        'begin
+        (append libbody
+                (map (lambda (sym)
+                       (list 'library-set! (library-name x) sym sym))
+                     exports))
+        (library-fields x)))))
+
+(define (library-definition-expanded? x)
+  (eq? (get-lib-field 'expanded (library-fields x)) #t))
+
 (define (rewrite-core-syntax x)
   (cond
     ((null? x)
@@ -1027,6 +1184,15 @@
           (define? (car x)))
      (rewrite-core-syntax
        (expand-define (car x) (cdr x))))
+
+    ((and (list? x)
+          (library-import? (car x)))
+     (rewrite-core-syntax
+       (expand-import (car x) (cdr x))))
+
+    ((unexpanded-library-definition? x)
+     (rewrite-core-syntax
+       (expand-library-definition x)))
 
     ((cond? x)
      (rewrite-core-syntax (expand-cond x)))
@@ -1058,10 +1224,28 @@
             (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
             ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
             ;(pretty assigned-vars)
-            ;(pretty assigned-vars)
             ;(pretty expanded)
             'success)
          else
+          (begin
+            (for remaining in (car assigned-vars)
+                 (error-print "set!: \"" remaining "\" is not defined, or not in scope of set!"))
+            (escape 'error)))))))
+
+(define (compile-library x)
+  (call/cc
+    (lambda (escape)
+      (let* ((expanded       (rewrite-core-syntax x))
+             (assigned-vars  (transform-assignments expanded)))
+        (if (null? (car assigned-vars))
+          (begin
+            (emit-comment "compiling a library")
+            (emit-library (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
+            ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
+            ;(pretty assigned-vars)
+            ;(pretty expanded)
+            'success)
+          else
           (begin
             (for remaining in (car assigned-vars)
                  (error-print "set!: \"" remaining "\" is not defined, or not in scope of set!"))
@@ -1109,8 +1293,12 @@
       (let* ((port (open filename "r"))
              (program (cons 'begin (read-program port))))
 
-        ;(pretty program)
-        (emit-comment "compilation result: " (compile-program program))))
+        (cond
+          ((arguments-contain-flag? "-library" args)
+           (emit-comment "library compilation result: " (compile-library program)))
+
+          (else
+            (emit-comment "program compilation result: " (compile-program program))))))
 
   else
     (error-print "Need filename to compile")))

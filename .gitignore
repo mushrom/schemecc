@@ -1,0 +1,6 @@
+*.o
+*.testout
+*.diff
+*.progout
+*.libstub
+*.asm

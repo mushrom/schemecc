@@ -1270,7 +1270,7 @@
             (emit-comment "dumping " thing)
             (cond
               ((eq? thing "expanded") (pretty expanded))
-              ((eq? thing "assigned") (pretty assigned))
+              ((eq? thing "assigned") (pretty assigned-vars))
               ((eq? thing "lambdas")  (pretty lambda-free))
               ((eq? thing "labeled")  (pretty labeled))
               ((eq? thing "resolved") (pretty vars-resolved))

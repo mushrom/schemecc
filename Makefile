@@ -3,8 +3,15 @@ TESTOBJ  = $(TESTSRC:.scm=.o)
 TESTPROG = $(TESTSRC:.scm=.progout)
 TESTOUT  = $(TESTSRC:.scm=.testout)
 DIFFOUT  = $(TESTSRC:.scm=.diff)
+LIBSRC   = $(wildcard libs/*.scm)
+LIBOBJ   = $(LIBSRC:.scm=_lib.o)
+LIBSTUB  = $(LIBSRC:.scm=_lib.libstub)
 
-all: stub.o $(TESTPROG)
+all: stub.o $(TESTPROG) $(LIBOBJ)
+
+%_lib.asm: %.scm
+	@echo "SCHEMECC -library $< > $@"
+	@gojira foo.scm -library $< > $@
 
 %.asm: %.scm
 	@echo "SCHEMECC $< > $@"
@@ -16,7 +23,7 @@ all: stub.o $(TESTPROG)
 
 %.progout: %.o
 	@echo CC $< -o $@
-	@$(CC) $(CFLAGS) -o $@ stub.o $<
+	@$(CC) $(CFLAGS) -o $@ stub.o $< $(LIBOBJ)
 
 %.testout: %.progout
 	@-./$< 2>&1 > $@
@@ -26,7 +33,7 @@ all: stub.o $(TESTPROG)
 
 stub.o: stub.c
 
-$(TESTPROG): stub.o foo.scm
+$(TESTPROG): stub.o foo.scm  $(LIBOBJ)
 
 clean-tests:
 	@-echo "  > cleaning test output"
@@ -40,6 +47,10 @@ clean-obj:
 	@-echo "  > cleaning objects"
 	@rm -f *.o
 
+clean-libs:
+	@-echo "  > cleaning libraries"
+	@rm -f libs/*.o
+
 clean: clean-tests clean-obj
 
 testgen: stub.o $(DIFFOUT)
@@ -47,3 +58,5 @@ testgen: stub.o $(DIFFOUT)
 	@for test in tests/*.diff; do echo "<=> $$test"; cat $$test | sed 's/.*/    | &/g'; done
 
 test: testgen clean-tests
+
+libs: $(LIBOBJ)

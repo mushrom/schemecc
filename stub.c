@@ -12,6 +12,7 @@ enum {
 	SCM_TYPE_PAIR       = 0x01,
 	SCM_TYPE_CLOSURE    = 0x06,
 	SCM_TYPE_VECTOR     = 0x02,
+	SCM_TYPE_STRING     = 0x03,
 
 	SCM_MASK_INTEGER = 0x3,
 	SCM_MASK_BOOLEAN = 0x7f,
@@ -84,6 +85,12 @@ void print_scheme_obj( scm_data val ){
 		}
 
 		putchar( ')' );
+
+	} else if (( val & SCM_MASK_HEAP ) == SCM_TYPE_STRING ){
+		scm_data *dataptr = (void *)( val & ~SCM_MASK_HEAP );
+		char *strptr = (char *)dataptr;
+
+		printf( "\"%s\"", strptr + 8 );
 	}
 }
 

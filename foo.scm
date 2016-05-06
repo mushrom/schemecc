@@ -99,7 +99,9 @@
        (not (null? x))
        (member? (car x) '(add1 + - < > = cons car cdr begin
                           vector vector-ref vector-set!
-                          stack-ref closure-ref))))
+                          stack-ref closure-ref
+                          string
+                          ))))
 
 (define (let? x)
   (and (list? x)
@@ -378,6 +380,31 @@
         (emit "mov [rdx + 8], rax")
         (emit "mov rax, [rsp - " sindex "]"))
 
+       ((eq? op 'string)
+        ;; (string ...) must have ... as a list of constant characters,
+        ;; so there's no need to do an (emit-expr) here
+        (let ((strlen (+ 1 (length (cdr x)))))
+          ;; todo: find more efficient way to do this
+          (define (str-iter x str)
+            (if (not (null? str))
+              (begin
+                (emit "mov al, " (char->integer (car str)))
+                (emit "mov [rbp + " x "], al")
+                (str-iter (+ x 1) (cdr str)))
+
+              (begin
+                (emit "mov al, 0")
+                (emit "mov [rbp + " x "], al"))))
+
+          (emit "mov rax, " strlen)
+          (emit "mov [rbp], rax")
+          (str-iter wordsize (cdr x))
+
+          (emit "mov rax, rbp")
+          (emit "or rax, 0b011")
+          (emit "add rbp, " (+ wordsize strlen
+                               (- wordsize (modulo strlen wordsize))))))
+
       (true 'asdf))))
 
 (define (emit-expr-list xs sindex)
@@ -439,8 +466,9 @@
 (define (emit-closure x sindex)
   (define (iter x cindex)
     (when (not (null? x))
-      (emit-primitive-call (car x) sindex)
-      (emit "mov [rbp + " (pointer-index (+ cindex 1)) "], rax")
+      (emit-primitive-call (car x) (+ wordsize sindex))
+      (emit "mov rdx, [rsp - " sindex "]")
+      (emit "mov [rdx + " (pointer-index (+ cindex 1)) "], rax")
       (iter (cdr x) (+ cindex 1))))
 
   (emit-comment "making closure for " (cadr x)
@@ -448,10 +476,13 @@
 
   (emit "mov rax, " (apply values (cadr x)))
   (emit "mov [rbp], rax")
+
+  (emit "mov [rsp - " sindex "], rbp")
+  (emit "add rbp, " (+ wordsize (* wordsize (length (cddr x)))))
+
   (iter (cddr x) 0)
-  (emit "mov rax, rbp")
-  (emit "or rax, 0b110")
-  (emit "add rbp, " (+ wordsize (* wordsize (length (cddr x))))))
+  (emit "mov rax, [rsp - " sindex "]")
+  (emit "or rax, 0b110"))
 
 (define (emit-funcall x sindex)
   (define new-stack-pos 3)
@@ -1242,6 +1273,24 @@
 
     (true x)))
 
+(define (expand-string x)
+  (cons 'string (string->list x)))
+
+(define (expand-string-constants x)
+  (cond
+    ((null? x) '())
+
+    ((foreign-call? x) x)
+
+    ((string? x)
+     (expand-string x))
+
+    ((list? x)
+     (cons (expand-string-constants (car x))
+           (expand-string-constants (cdr x))))
+
+    (else x)))
+
 (load! "pretty.scm")
 
 (define (get-base-filename str)
@@ -1257,7 +1306,7 @@
 (define (compile-object x args)
   ;; todo: do this more efficiently once it becomes a problem,
   ;;       keeping the tree from each step is not good for memory usage
-  (let* ((expanded       (rewrite-core-syntax x))
+  (let* ((expanded       (rewrite-core-syntax (expand-string-constants x)))
          (assigned-vars  (do-transform-assignments expanded))
          (lambda-free    (transform-lambdas (cadr assigned-vars)))
          (labeled        (gen-labels lambda-free '()))
@@ -1323,7 +1372,8 @@
       (emit-comment "compiling " filename)
       (let* ((port (open filename "r"))
              (program (cons 'begin (read-program port))))
-        (compile-object program args)))
+        (compile-object program args)
+        ))
 
   else
     (error-print "Need filename to compile")))

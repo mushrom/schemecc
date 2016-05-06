@@ -3,6 +3,43 @@
 ;; XXX: compatibility with scheme cond and gojira's incomplete cond
 (define else #t)
 
+;; some basic error handling
+(define error-port (open "/dev/stderr" "w"))
+
+(define (error-print :rest x)
+  (display "ERROR: " error-port)
+  (for thing in x
+    (display thing error-port))
+  (display #\newline error-port))
+
+(define (abandon-hope message)
+  (error-print message)
+  (exit 1))
+
+(define-syntax assert
+  (syntax-rules ()
+    ((_ condition value message)
+     (if (not (condition value))
+       (abandon-hope (list message ":" value))
+       value))
+
+    ((_ condition value)
+     (if (not (condition value))
+       (abandon-hope (list "failed assertion" 'condition "in expression:" value))
+       value))))
+
+(define-syntax assert-no-eval
+  (syntax-rules ()
+    ((_ condition value message)
+     (if (not (condition value))
+       (abandon-hope '(message ":" value))
+       value))
+
+    ((_ condition value)
+     (if (not (condition value))
+       (abandon-hope '("failed assertion" condition "in expression:" value))
+       value))))
+
 (define (emit :rest args)
   (display #\tab)
   (for-each display args)
@@ -808,7 +845,8 @@
         (list 'closure-ref (list-index x (closure-free closure))))
 
        (true
-         (emit-comment "didn't find " x ". (todo: error out here)")
+         (abandon-hope (list "undefined variable :" x))
+         ;(emit-comment "didn't find " x ". (todo: error out here)")
          'unfound-variable)))
 
     ((library-definition? x)
@@ -1206,50 +1244,43 @@
 
 (load! "pretty.scm")
 
-(define error-port (open "/dev/stderr" "w"))
+(define (get-base-filename str)
+  (list->string
+    (delim (string->list str) #\.)))
 
-(define (error-print :rest x)
-  (display "ERROR: " error-port)
-  (for thing in x
-    (display thing error-port))
-  (display #\newline error-port))
+(define (do-transform-assignments x)
+  (let ((tranformed (transform-assignments x)))
+    (assert null? (car tranformed)
+            "undefined/out of scope references in set!")
+    tranformed))
 
-(define (compile-program x)
-  (call/cc
-    (lambda (escape)
-      (let* ((expanded       (rewrite-core-syntax x))
-             (assigned-vars  (transform-assignments expanded)))
-        (if (null? (car assigned-vars))
-          (begin
-            (emit-program (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
-            ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
-            ;(pretty assigned-vars)
-            ;(pretty expanded)
-            'success)
-         else
-          (begin
-            (for remaining in (car assigned-vars)
-                 (error-print "set!: \"" remaining "\" is not defined, or not in scope of set!"))
-            (escape 'error)))))))
+(define (compile-object x args)
+  ;; todo: do this more efficiently once it becomes a problem,
+  ;;       keeping the tree from each step is not good for memory usage
+  (let* ((expanded       (rewrite-core-syntax x))
+         (assigned-vars  (do-transform-assignments expanded))
+         (lambda-free    (transform-lambdas (cadr assigned-vars)))
+         (labeled        (gen-labels lambda-free '()))
+         (vars-resolved  (resolve-labels-var-refs labeled)))
 
-(define (compile-library x)
-  (call/cc
-    (lambda (escape)
-      (let* ((expanded       (rewrite-core-syntax x))
-             (assigned-vars  (transform-assignments expanded)))
-        (if (null? (car assigned-vars))
-          (begin
-            (emit-comment "compiling a library")
-            (emit-library (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
-            ;(pretty (resolve-labels-var-refs (gen-labels (transform-lambdas (cadr assigned-vars)) '())))
-            ;(pretty assigned-vars)
-            ;(pretty expanded)
-            'success)
-          else
-          (begin
-            (for remaining in (car assigned-vars)
-                 (error-print "set!: \"" remaining "\" is not defined, or not in scope of set!"))
-            (escape 'error)))))))
+    (cond
+      ((arguments-contain-flag? "-dump" args)
+       (let ((dumps (get-lib-field "-dump" args)))
+         (for-var thing in dumps
+            (emit-comment "dumping " thing)
+            (cond
+              ((eq? thing "expanded") (pretty expanded))
+              ((eq? thing "assigned") (pretty assigned))
+              ((eq? thing "lambdas")  (pretty lambda-free))
+              ((eq? thing "labeled")  (pretty labeled))
+              ((eq? thing "resolved") (pretty vars-resolved))
+              (true '())))))
+
+      ((arguments-contain-flag? "-library" args)
+       (emit-library vars-resolved))
+
+      (else
+        (emit-program vars-resolved)))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)
@@ -1292,13 +1323,7 @@
       (emit-comment "compiling " filename)
       (let* ((port (open filename "r"))
              (program (cons 'begin (read-program port))))
-
-        (cond
-          ((arguments-contain-flag? "-library" args)
-           (emit-comment "library compilation result: " (compile-library program)))
-
-          (else
-            (emit-comment "program compilation result: " (compile-program program))))))
+        (compile-object program args)))
 
   else
     (error-print "Need filename to compile")))

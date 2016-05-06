@@ -1303,33 +1303,34 @@
             "undefined/out of scope references in set!")
     tranformed))
 
+(define (analysis-passes x dumpflags)
+  (define (dump arg value)
+    (when (and (not (eq? dumpflags #f))
+               (member? arg dumpflags))
+      (pretty value))
+    value)
+
+  (dump "resolved" (resolve-labels-var-refs
+  (dump "labeled"    (gen-labels
+  (dump "lambdas"      (transform-lambdas
+  (dump "assigned"       (cadr (do-transform-assignments
+  (dump "expanded"         (rewrite-core-syntax
+                                (expand-string-constants x))))))
+                       '())))))))
+
 (define (compile-object x args)
   ;; todo: do this more efficiently once it becomes a problem,
   ;;       keeping the tree from each step is not good for memory usage
-  (let* ((expanded       (rewrite-core-syntax (expand-string-constants x)))
-         (assigned-vars  (do-transform-assignments expanded))
-         (lambda-free    (transform-lambdas (cadr assigned-vars)))
-         (labeled        (gen-labels lambda-free '()))
-         (vars-resolved  (resolve-labels-var-refs labeled)))
+  (cond
+    ((arguments-contain-flag? "-dump" args)
+     (let ((dumps (get-lib-field "-dump" args)))
+       (analysis-passes x dumps)))
 
-    (cond
-      ((arguments-contain-flag? "-dump" args)
-       (let ((dumps (get-lib-field "-dump" args)))
-         (for-var thing in dumps
-            (emit-comment "dumping " thing)
-            (cond
-              ((eq? thing "expanded") (pretty expanded))
-              ((eq? thing "assigned") (pretty assigned-vars))
-              ((eq? thing "lambdas")  (pretty lambda-free))
-              ((eq? thing "labeled")  (pretty labeled))
-              ((eq? thing "resolved") (pretty vars-resolved))
-              (true '())))))
+    ((arguments-contain-flag? "-library" args)
+     (emit-library vars-resolved))
 
-      ((arguments-contain-flag? "-library" args)
-       (emit-library vars-resolved))
-
-      (else
-        (emit-program vars-resolved)))))
+    (else
+      (emit-program (analysis-passes x #f)))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)

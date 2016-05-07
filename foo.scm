@@ -1377,4 +1377,15 @@
         ))
 
   else
-    (error-print "Need filename to compile")))
+    (for-each print
+      '("usage: ./foo.scm [options] program.scm"
+        "  options:"
+        "    -library             : Specify that [program.scm] is a library."
+        "                           this prevents the compiler from outputting"
+        "                           various entry-point code that would interfere"
+        "                           with linking."
+        "    -dump:[ expanded     : Output stages of the analysis pass for debugging."
+        "          | assigned       multiple dumps can be specified by seperating"
+        "          | lambdas        options with a colon, eg. '-dump:expanded:labeled'"
+        "          | labeled"
+        "          | resolved ]"))))

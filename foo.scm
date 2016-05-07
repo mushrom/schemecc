@@ -40,38 +40,49 @@
        (abandon-hope '("failed assertion" condition "in expression:" value))
        value))))
 
-(define (emit :rest args)
-  (display #\tab)
-  (for-each display args)
-  (newline))
+(define (emit port :rest args)
+  (display #\tab port)
+  (for-each (lambda (x)
+              (display x port))
+            args)
+  (newline port))
 
-(define (emit-comment :rest args)
-  (display #\tab)
-  (display "; ")
-  (for-each write args)
-  (newline))
+(define (emit-comment port :rest args)
+  (display #\tab port)
+  (display "; " port)
+  (for-each (lambda (x)
+              (write x port))
+            args)
+  (newline port))
 
-(define (emit-flag :rest args)
-  (for-each display args)
-  (newline))
+(define (emit-flag port :rest args)
+  (for-each (lambda (x)
+              (display x port))
+            args)
+  (newline port))
 
-(define (emit-label labelspec)
+(define (emit-label port labelspec)
   (cond
     ((list? labelspec)
-     (for-each display labelspec))
+     (for-each (lambda (x)
+                 (display x port))
+               labelspec))
 
     (else
-      (display labelspec)))
+      (display labelspec port)))
 
-  (display ":")
-  (newline))
+  (display ":" port)
+  (newline port))
 
 (define *cur-label* 0)
 (define *cur-temp* 0)
 
 (define (unique-label)
   (set! *cur-label* (+ *cur-label* 1))
-  (list ".label" *cur-label*))
+  (string->symbol
+    (string-append
+      ".label"
+      (number->string *cur-label*))))
 
 (define (unique-temp-var)
   (set! *cur-temp* (+ *cur-temp* 1))
@@ -249,162 +260,162 @@
 
         (true "error: no immediate representation eh")))
 
-(define (emit-primitive-call x sindex)
+(define (emit-primitive-call port x sindex)
   (let ((op (primcall-op x)))
-    (emit-comment "primcall " op ": " x)
+    (emit-comment port "primcall " op ": " x)
 
     (cond
       ((eq? op 'add1)
-       (emit-expr (primcall-op-1 x) sindex)
-       (emit "add rax, " (immediate-rep 1)))
+       (emit-expr port (primcall-op-1 x) sindex)
+       (emit port "add rax, " (immediate-rep 1)))
 
       ((eq? op '+)
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
-       (emit "add rax, [rsp - " sindex "]"))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
+       (emit port "add rax, [rsp - " sindex "]"))
 
       ((eq? op '-)
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
-       (emit "sub rax, [rsp - " sindex "]"))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
+       (emit port "sub rax, [rsp - " sindex "]"))
 
       ((eq? op '<)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
 
-       (emit "cmp rax, [rsp - " sindex "]")
-       (emit-jl L0)
+       (emit port "cmp rax, [rsp - " sindex "]")
+       (emit-jl port L0)
 
-       (emit "mov rax, " (immediate-rep #f))
-       (emit-jmp L1)
+       (emit port "mov rax, " (immediate-rep #f))
+       (emit-jmp port L1)
 
-       (emit-label L0)
-       (emit "mov rax, " (immediate-rep #t))
+       (emit-label port L0)
+       (emit port "mov rax, " (immediate-rep #t))
 
-       (emit-label L1)))
+       (emit-label port L1)))
 
       ((eq? op '>)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
 
-       (emit "cmp rax, [rsp - " sindex "]")
-       (emit-jg L0)
+       (emit port "cmp rax, [rsp - " sindex "]")
+       (emit-jg port L0)
 
-       (emit "mov rax, " (immediate-rep #f))
-       (emit-jmp L1)
+       (emit port "mov rax, " (immediate-rep #f))
+       (emit-jmp port L1)
 
-       (emit-label L0)
-       (emit "mov rax, " (immediate-rep #t))
+       (emit-label port L0)
+       (emit port "mov rax, " (immediate-rep #t))
 
-       (emit-label L1)))
+       (emit-label port L1)))
 
       ((eq? op '=)
        (let ((L0 (unique-label))
              (L1 (unique-label)))
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
 
-       (emit "cmp rax, [rsp - " sindex "]")
-       (emit-je L0)
+       (emit port "cmp rax, [rsp - " sindex "]")
+       (emit-je port L0)
 
-       (emit "mov rax, " (immediate-rep #f))
-       (emit-jmp L1)
+       (emit port "mov rax, " (immediate-rep #f))
+       (emit-jmp port L1)
 
-       (emit-label L0)
-       (emit "mov rax, " (immediate-rep #t))
+       (emit-label port L0)
+       (emit port "mov rax, " (immediate-rep #t))
 
-       (emit-label L1)))
+       (emit-label port L1)))
 
       ((eq? op 'cons)
-       (emit-expr (primcall-op-2 x) sindex)
-       (emit "mov [rsp - " sindex "], rax")
-       (emit-expr (primcall-op-1 x) (+ sindex 8))
+       (emit-expr port (primcall-op-2 x) sindex)
+       (emit port "mov [rsp - " sindex "], rax")
+       (emit-expr port (primcall-op-1 x) (+ sindex 8))
 
-       (emit "mov [rbp], rax")
-       (emit "mov rax, [rsp - " sindex "]" )
-       (emit "mov [rbp+8], rax")
-       (emit "mov rax, rbp")
-       (emit "or rax, 1")
-       (emit "add rbp, 16"))
+       (emit port "mov [rbp], rax")
+       (emit port "mov rax, [rsp - " sindex "]" )
+       (emit port "mov [rbp+8], rax")
+       (emit port "mov rax, rbp")
+       (emit port "or rax, 1")
+       (emit port "add rbp, 16"))
 
       ((eq? op 'car)
-       (emit-expr (primcall-op-1 x) sindex)
-       (emit "and rax, ~7")
-       (emit "mov rax, [rax]"))
+       (emit-expr port (primcall-op-1 x) sindex)
+       (emit port "and rax, ~7")
+       (emit port "mov rax, [rax]"))
 
       ((eq? op 'cdr)
-       (emit-expr (primcall-op-1 x) sindex)
-       (emit "and rax, ~7")
-       (emit "add rax, 8")
-       (emit "mov rax, [rax]"))
+       (emit-expr port (primcall-op-1 x) sindex)
+       (emit port "and rax, ~7")
+       (emit port "add rax, 8")
+       (emit port "mov rax, [rax]"))
 
       ((eq? op 'closure-ref)
-       (emit "mov rdx, [rsp - 8]")
-       (emit "and rdx, ~0b110")
-       (emit "mov rax, [rdx + " (pointer-index (+ (primcall-op-1 x) 1)) "]"))
+       (emit port "mov rdx, [rsp - 8]")
+       (emit port "and rdx, ~0b110")
+       (emit port "mov rax, [rdx + " (pointer-index (+ (primcall-op-1 x) 1)) "]"))
 
       ((eq? op 'stack-ref)
-       (emit "mov rax, [rsp - " (pointer-index (+ arg-stack-pos (primcall-op-1 x))) "]"))
+       (emit port "mov rax, [rsp - " (pointer-index (+ arg-stack-pos (primcall-op-1 x))) "]"))
 
       ((eq? op 'begin)
-       (emit-comment (cdr x))
-       (emit-expr-list (cdr x) sindex))
+       (emit-comment port (cdr x))
+       (emit-expr-list port (cdr x) sindex))
 
       ((eq? op 'vector)
-       (emit-comment "making vector")
+       (emit-comment port "making vector")
 
        (let ((veclen (length (cdr x))))
          (define (loopy args i)
            (when (not (null? args))
-             (emit-expr (car args) sindex)
-             (emit "mov [rbp + " (pointer-index i) "], rax")
+             (emit-expr port (car args) sindex)
+             (emit port "mov [rbp + " (pointer-index i) "], rax")
              (loopy (cdr args) (+ i 1))))
 
-         (emit "mov rax, " (immediate-rep veclen))
-         (emit "mov [rbp], rax")
+         (emit port "mov rax, " (immediate-rep veclen))
+         (emit port "mov [rbp], rax")
          (loopy (cdr x) 1)
-         (emit "mov rax, rbp")
-         (emit "or rax, 0b010")
-         (emit "add rbp, " (pointer-index (+ 1 veclen)))))
+         (emit port "mov rax, rbp")
+         (emit port "or rax, 0b010")
+         (emit port "add rbp, " (pointer-index (+ 1 veclen)))))
 
        ((eq? op 'vector-ref)
         ; todo: add length checking and error out when appropriate
-        (emit-expr (primcall-op-2 x) sindex)
-        (emit "mov [rsp - " sindex "], rax")
-        (emit-expr (primcall-op-1 x) sindex)
+        (emit-expr port (primcall-op-2 x) sindex)
+        (emit port "mov [rsp - " sindex "], rax")
+        (emit-expr port (primcall-op-1 x) sindex)
 
-        (emit "mov rdx, [rsp - " sindex "]")
-        (emit "shl rdx, 1") ; numbers are already the number multiplied by 4, so
+        (emit port "mov rdx, [rsp - " sindex "]")
+        (emit port "shl rdx, 1") ; numbers are already the number multiplied by 4, so
                             ; we can shift left by one to make it multiplied by 8
-        (emit "and rax, ~0b010")
-        (emit "mov rax, [rax + rdx + 8]"))
+        (emit port "and rax, ~0b010")
+        (emit port "mov rax, [rax + rdx + 8]"))
 
        ((eq? op 'vector-set!)
-        (emit-expr (primcall-op-2 x) sindex)
-        (emit "mov [rsp - " sindex "], rax")
+        (emit-expr port (primcall-op-2 x) sindex)
+        (emit port "mov [rsp - " sindex "], rax")
 
-        (emit-expr (primcall-op-3 x) (+ sindex wordsize))
-        (emit "mov [rsp - " (+ sindex wordsize) "], rax")
+        (emit-expr port (primcall-op-3 x) (+ sindex wordsize))
+        (emit port "mov [rsp - " (+ sindex wordsize) "], rax")
 
-        (emit-expr (primcall-op-1 x) (+ sindex wordsize wordsize))
+        (emit-expr port (primcall-op-1 x) (+ sindex wordsize wordsize))
 
-        (emit "mov rdx, [rsp - " sindex "]")
-        (emit "mov [rsp - " sindex "], rax")
-        (emit "shl rdx, 1")
-        (emit "add rdx, rax")
-        (emit "and rdx, ~0b010")
-        (emit "mov rax, [rsp - " (+ sindex wordsize) "]")
-        (emit "mov [rdx + 8], rax")
-        (emit "mov rax, [rsp - " sindex "]"))
+        (emit port "mov rdx, [rsp - " sindex "]")
+        (emit port "mov [rsp - " sindex "], rax")
+        (emit port "shl rdx, 1")
+        (emit port "add rdx, rax")
+        (emit port "and rdx, ~0b010")
+        (emit port "mov rax, [rsp - " (+ sindex wordsize) "]")
+        (emit port "mov [rdx + 8], rax")
+        (emit port "mov rax, [rsp - " sindex "]"))
 
        ((eq? op 'string)
         ;; (string ...) must have ... as a list of constant characters,
@@ -414,140 +425,140 @@
           (define (str-iter x str)
             (if (not (null? str))
               (begin
-                (emit "mov al, " (char->integer (car str)))
-                (emit "mov [rbp + " x "], al")
+                (emit port "mov al, " (char->integer (car str)))
+                (emit port "mov [rbp + " x "], al")
                 (str-iter (+ x 1) (cdr str)))
 
               (begin
-                (emit "mov al, 0")
-                (emit "mov [rbp + " x "], al"))))
+                (emit port "mov al, 0")
+                (emit port "mov [rbp + " x "], al"))))
 
-          (emit "mov rax, " strlen)
-          (emit "mov [rbp], rax")
+          (emit port "mov rax, " strlen)
+          (emit port "mov [rbp], rax")
           (str-iter wordsize (cdr x))
 
-          (emit "mov rax, rbp")
-          (emit "or rax, 0b011")
-          (emit "add rbp, " (+ wordsize strlen
-                               (- wordsize (modulo strlen wordsize))))))
+          (emit port "mov rax, rbp")
+          (emit port "or rax, 0b011")
+          (emit port "add rbp, " (+ wordsize strlen
+                                    (- wordsize (modulo strlen wordsize))))))
 
       (true 'asdf))))
 
-(define (emit-expr-list xs sindex)
+(define (emit-expr-list port xs sindex)
   (when (not (null? xs))
-    (emit-comment "emitting next expression in list")
-    (emit-expr (car xs) sindex)
-    (emit-expr-list (cdr xs) sindex)))
+    (emit-comment port "emitting next expression in list")
+    (emit-expr port (car xs) sindex)
+    (emit-expr-list port (cdr xs) sindex)))
 
 (define bindings cadr)
 (define body     cddr)
 
-(define (emit-let bindings body sindex)
+(define (emit-let port bindings body sindex)
   (define (f b* sindex)
-    (emit-comment b* " " sindex)
+    (emit-comment port b* " " sindex)
     (cond
       ((null? b*)
-       (emit-expr-list body sindex))
+       (emit-expr-list port body sindex))
 
       (true
         (let ((b (car b*)))
-          (emit-comment "binding " (car b) " => " (cadr b))
-          (emit-expr (cadr b) sindex)
-          (emit "mov [rsp - " sindex "], rax")
+          (emit-comment port "binding " (car b) " => " (cadr b))
+          (emit-expr port (cadr b) sindex)
+          (emit port "mov [rsp - " sindex "], rax")
           (f (cdr b*)
              (+ sindex 8))))))
   
   (f bindings sindex))
 
-(define (emit-cmp comp reg)
-  (emit "cmp " reg ", " comp))
+(define (emit-cmp port comp reg)
+  (emit port "cmp " reg ", " comp))
 
-(define (emit-je labelspec)
-  (apply emit (cons "je " labelspec)))
+(define (emit-je port labelspec)
+  (emit port "je " labelspec))
 
-(define (emit-jl labelspec)
-  (apply emit (cons "jl " labelspec)))
+(define (emit-jl port labelspec)
+  (emit port "jl " labelspec))
 
-(define (emit-jg labelspec)
-  (apply emit (cons "jg " labelspec)))
+(define (emit-jg port labelspec)
+  (emit port "jg " labelspec))
 
-(define (emit-jmp labelspec)
-  (apply emit (cons "jmp " labelspec)))
+(define (emit-jmp port labelspec)
+  (emit port "jmp " labelspec))
 
-(define (emit-if test conseq altern sindex)
+(define (emit-if port test conseq altern sindex)
   (let ((L0 (unique-label))
         (L1 (unique-label)))
-    (emit-expr test sindex)
-    (emit-cmp (immediate-rep #f) 'rax)
-    (emit-je L0)
+    (emit-expr port test sindex)
+    (emit-cmp port (immediate-rep #f) 'rax)
+    (emit-je port L0)
 
-    (emit-expr conseq sindex)
-    (emit-jmp L1)
+    (emit-expr port conseq sindex)
+    (emit-jmp port L1)
 
-    (emit-label L0)
-    (emit-expr altern sindex)
+    (emit-label port L0)
+    (emit-expr port altern sindex)
 
-    (emit-label L1)))
+    (emit-label port L1)))
 
-(define (emit-closure x sindex)
+(define (emit-closure port x sindex)
   (define (iter x cindex)
     (when (not (null? x))
-      (emit-primitive-call (car x) (+ wordsize sindex))
-      (emit "mov rdx, [rsp - " sindex "]")
-      (emit "mov [rdx + " (pointer-index (+ cindex 1)) "], rax")
+      (emit-primitive-call port (car x) (+ wordsize sindex))
+      (emit port "mov rdx, [rsp - " sindex "]")
+      (emit port "mov [rdx + " (pointer-index (+ cindex 1)) "], rax")
       (iter (cdr x) (+ cindex 1))))
 
-  (emit-comment "making closure for " (cadr x)
+  (emit-comment port "making closure for " (cadr x)
                 ", capturing " (cddr x))
 
-  (emit "mov rax, " (apply values (cadr x)))
-  (emit "mov [rbp], rax")
+  (emit port "mov rax, " (cadr x))
+  (emit port "mov [rbp], rax")
 
-  (emit "mov [rsp - " sindex "], rbp")
-  (emit "add rbp, " (+ wordsize (* wordsize (length (cddr x)))))
+  (emit port "mov [rsp - " sindex "], rbp")
+  (emit port "add rbp, " (+ wordsize (* wordsize (length (cddr x)))))
 
   (iter (cddr x) 0)
-  (emit "mov rax, [rsp - " sindex "]")
-  (emit "or rax, 0b110"))
+  (emit port "mov rax, [rsp - " sindex "]")
+  (emit port "or rax, 0b110"))
 
-(define (emit-funcall x sindex)
+(define (emit-funcall port x sindex)
   (define new-stack-pos 3)
   
   (define (args-iter args i)
     (when (not (null? args))
-      (emit-expr (car args) (+ sindex (pointer-index i)))
-      (emit "mov [rsp - " (+ sindex (pointer-index i)) "], rax")
+      (emit-expr port (car args) (+ sindex (pointer-index i)))
+      (emit port "mov [rsp - " (+ sindex (pointer-index i)) "], rax")
       (args-iter (cdr args) (+ i 1))))
 
   (args-iter (cdr x) new-stack-pos)
 
-  (emit-comment "operator: " (car x))
-  (emit-expr (car x) sindex)
-  (emit "mov rbx, rax")
+  (emit-comment port "operator: " (car x))
+  (emit-expr port (car x) sindex)
+  (emit port "mov rbx, rax")
 
-  (emit-comment "stack index: " sindex)
-  (emit "sub rsp, " sindex)
-  (emit "mov [rsp - 16], rbx")
-  (emit "and rbx, ~0b110")
-  (emit "mov rbx, [rbx]")
-  (emit "call rbx")
-  (emit "mov rbx, [rsp - 16]")
-  (emit "add rsp, " sindex))
+  (emit-comment port "stack index: " sindex)
+  (emit port "sub rsp, " sindex)
+  (emit port "mov [rsp - 16], rbx")
+  (emit port "and rbx, ~0b110")
+  (emit port "mov rbx, [rbx]")
+  (emit port "call rbx")
+  (emit port "mov rbx, [rsp - 16]")
+  (emit port "add rsp, " sindex))
 
-(define (emit-foreign-call x sindex)
+(define (emit-foreign-call port x sindex)
   (define (iter args regs)
     (when (and (not (null? args))
                (not (null? regs)))
-      (emit-expr (car args) sindex)
-      (emit-comment "next arg register: " (cdr regs))
-      (emit "mov " (car regs) ", rax")
+      (emit-expr port (car args) sindex)
+      (emit-comment port "next arg register: " (cdr regs))
+      (emit port "mov " (car regs) ", rax")
       (iter (cdr args) (cdr regs))))
 
   (iter (cddr x) call-regs)
-  (emit-flag "extern " (primcall-op-1 x))
-  (emit "sub rsp, " sindex)
-  (emit "call " (primcall-op-1 x))
-  (emit "add rsp, " sindex))
+  (emit-flag port "extern " (primcall-op-1 x))
+  (emit port "sub rsp, " sindex)
+  (emit port "call " (primcall-op-1 x))
+  (emit port "add rsp, " sindex))
 
 (define (gen-library-sym name thing)
   (string-concat (append (map (lambda (x)
@@ -555,8 +566,8 @@
                               name)
                          (list thing))))
 
-(define (emit-module-label name thing)
-  (emit-flag
+(define (emit-module-label port name thing)
+  (emit-flag port
     (string-concat (append (map (lambda (x)
                                   (string-append (symbol->string x) "_"))
                                 name)
@@ -567,17 +578,17 @@
     (list-remove-objs '(#\-)
                      (string->list (symbol->string sym)))))
 
-(define (emit-library-set! x sindex)
+(define (emit-library-set! port x sindex)
   (with x as (unused libname libsym value)
-     (emit-comment "library-set!: " libname " " libsym)
-     (emit-expr value sindex)
-     (emit "mov [" (gen-library-sym libname (sanitize-module-sym libsym)) "], rax")))
+     (emit-comment port "library-set!: " libname " " libsym)
+     (emit-expr port value sindex)
+     (emit port "mov [" (gen-library-sym libname (sanitize-module-sym libsym)) "], rax")))
 
-(define (emit-library-ref x sindex)
+(define (emit-library-ref port x sindex)
   (with x as (unused libname libsym)
-     (emit-comment "library-ref: " libname " " libsym)
-     (emit-flag "extern " (gen-library-sym libname (sanitize-module-sym libsym)))
-     (emit "mov rax, [" (gen-library-sym libname (sanitize-module-sym libsym)) "]")))
+     (emit-comment port "library-ref: " libname " " libsym)
+     (emit-flag port "extern " (gen-library-sym libname (sanitize-module-sym libsym)))
+     (emit port "mov rax, [" (gen-library-sym libname (sanitize-module-sym libsym)) "]")))
 
 (define (library-set!? x)
   (and (list? x)
@@ -597,12 +608,12 @@
 (define (gen-library-file-name libname)
   (gen-library-sym libname "lib.libstub"))
 
-(define (emit-library-definition x sindex)
-  (emit-comment "emitting library definition for " (library-name x))
+(define (emit-library-definition port x sindex)
+  (emit-comment port "emitting library definition for " (library-name x))
 
   (let ((exports (get-lib-field 'export (library-fields x)))
         (libname (library-name x)))
-    (emit-comment exports)
+    (emit-comment port exports)
 
     (let ((stubfile (open (gen-library-file-name libname) "w")))
       (write
@@ -613,79 +624,77 @@
 
       (display #\newline stubfile))
 
-    (emit-flag "section .bss")
+    (emit-flag port "section .bss")
 
     (when (not (null? exports))
       (for sym in (car exports)
-         (emit-flag "global " (gen-library-sym libname (sanitize-module-sym sym)))
-         (emit-module-label libname (sanitize-module-sym sym))
-         (emit "resq " 1)))
+         (emit-flag port "global " (gen-library-sym libname (sanitize-module-sym sym)))
+         (emit-module-label port libname (sanitize-module-sym sym))
+         (emit port "resq " 1)))
 
-    (emit-flag "section .text")
+    (emit-flag port "section .text")
 
-    (emit-flag "global " (gen-library-sym libname "lib"))
-    (emit-module-label (library-name x) "lib")
-    (emit-expr (car (get-lib-field 'begin (library-fields x))) sindex)
-    (emit "ret")))
+    (emit-flag port "global " (gen-library-sym libname "lib"))
+    (emit-module-label port (library-name x) "lib")
+    (emit-expr port (car (get-lib-field 'begin (library-fields x))) sindex)
+    (emit port "ret")))
 
-(define (emit-constant-set! x sindex)
+(define (emit-constant-set! port x sindex)
   (with x as (unused label value)
-    (emit-comment "constant-set!: " label ", "value)
-    (emit-expr value sindex)
-    (emit "mov [" label "], rax" )))
+    (emit-comment port "constant-set!: " label ", "value)
+    (emit-expr port value sindex)
+    (emit port "mov [" label "], rax" )))
 
-(define (emit-constant-ref x)
+(define (emit-constant-ref port x)
   (with x as (unused label)
-    (emit-comment "constant-ref: " label)
-    (emit "mov rax, [" label "]")))
+    (emit-comment port "constant-ref: " label)
+    (emit port "mov rax, [" label "]")))
 
-(define (emit-expr x sindex)
-  ;(emit-comment "expression: " x)
-  ;(emit-comment "============================")
+(define (emit-expr port x sindex)
   (cond
     ((immediate? x)
-     (emit-comment "immediate " x)
-     (emit "mov rax, " (immediate-rep x)))
+     (emit-comment port "immediate " x)
+     (emit port "mov rax, " (immediate-rep x)))
 
     ((let? x)
-     (emit-let (bindings x) (body x) sindex))
+     (emit-let port (bindings x) (body x) sindex))
 
     ((if? x)
-     (emit-comment "if " (cadr x))
-     (emit-if (cadr x) (caddr x) (caddr (cdr x)) sindex))
+     (emit-comment port "if " (cadr x))
+     (emit-if port (cadr x) (caddr x) (caddr (cdr x)) sindex))
 
     ((variable? x)
-     (emit-comment "Got variable reference.")
-     (emit-comment "This shouldn't happen, should have been caught in var. ref pass" x)
-     (emit-comment "todo: error out here")
+     (emit-comment port "Got variable reference.")
+     (emit-comment port "This shouldn't happen, should have been caught in var. ref pass" x)
+     (emit-comment port "todo: error out here")
      (abandon-hope (list "Have unbound variable reference \"" x "\"in codegen, wut?")))
 
     ((primcall? x)
-     (emit-primitive-call x sindex))
+     (emit-primitive-call port x sindex))
 
     ((closure? x)
-     (emit-closure x sindex))
+     (emit-closure port x sindex))
 
     ((foreign-call? x)
-     (emit-foreign-call x sindex))
+     (emit-foreign-call port x sindex))
 
     ((library-definition? x)
-     (emit-library-definition x sindex))
+     (emit-library-definition port x sindex))
 
     ((library-set!? x)
-     (emit-library-set! x sindex))
+     (emit-library-set! port x sindex))
 
     ((library-ref? x)
-     (emit-library-ref x sindex))
+     (emit-library-ref port x sindex))
 
     ((constant-set!? x)
-     (emit-constant-set! x sindex))
+     (emit-constant-set! port x sindex))
 
     ((constant-ref? x)
-     (emit-constant-ref x))
+     (emit-constant-ref port x))
 
     ((list? x)
-     (emit-funcall x sindex))
+     (emit-funcall port x sindex))
 
     (true (print "wut"))))
 
@@ -710,75 +719,75 @@
        (not (null? x))
        (eq? (get-label-type x) 'datum)))
 
-(define (emit-label-code x labels)
-  (emit-comment (label-code-body x))
-  (emit-label (car x))
-  (emit-expr-list (label-code-body x)
+(define (emit-label-code port x labels)
+  (emit-comment port (label-code-body x))
+  (emit-label port (car x))
+  (emit-expr-list port (label-code-body x)
                   (pointer-index (+ arg-stack-pos
                                     (length (label-code-free-vars x)))))
-  (emit "ret"))
+  (emit port "ret"))
 
-(define (emit-label-datum x labels)
-  (emit-label (car x))
-  (emit "resq 1"))
+(define (emit-label-datum port x labels)
+  (emit-label port (car x))
+  (emit port "resq 1"))
 
-(define (emit-labels x labels)
+(define (emit-labels port x labels)
   (when (not (null? x))
     (let ((cur-label (car x)))
-      (emit-comment "emitting " cur-label)
+      (emit-comment port "emitting " cur-label)
       (cond
         ((code-label? cur-label)
-         (emit-flag "section .text")
-         (emit-label-code cur-label labels))
+         (emit-flag port "section .text")
+         (emit-label-code port cur-label labels))
 
         ((datum-label? cur-label)
-         (emit-flag "section .bss")
-         (emit-label-datum cur-label labels))
+         (emit-flag port "section .bss")
+         (emit-label-datum port cur-label labels))
 
         (else
           (abandon-hope (list "unknown label type :"
                               (get-label-type cur-label))))))
 
-    (emit-labels (cdr x) labels)))
+    (emit-labels port (cdr x) labels)))
 
-(define (emit-program x)
+(define (emit-program port x)
   (if (labels? x)
     (begin
-      (emit-flag "bits 64")
-      (emit-flag "extern scheme_heap")
-      (emit-flag "global scheme_thing")
-      (emit-flag "section .text")
-      (emit-flag "scheme_thing:")
-      (emit "push rbp")
-      (emit "push rbx")
-      (emit "mov rbp, scheme_heap")
+      (emit-flag port "bits 64")
+      (emit-flag port "extern scheme_heap")
+      (emit-flag port "global scheme_thing")
+      (emit-flag port "section .text")
+      (emit-flag port "scheme_thing:")
+      (emit port "push rbp")
+      (emit port "push rbx")
+      (emit port "mov rbp, scheme_heap")
 
       ; emit main program code
-      (emit-flag ".scheme_entry:")
-      (emit-expr (caddr x) (pointer-index arg-stack-pos))
-      (emit "pop rbx")
-      (emit "pop rbp")
-      (emit "ret")
+      (emit-flag port ".scheme_entry:")
+      (emit-expr port (caddr x) (pointer-index arg-stack-pos))
+      (emit port "pop rbx")
+      (emit port "pop rbp")
+      (emit port "ret")
 
       ; emit code for labels
-      (emit-flag ".scheme_labels:")
-      (emit-labels (cadr x) (cadr x)))
+      (emit-flag port ".scheme_labels:")
+      (emit-labels port (cadr x) (cadr x)))
 
-    (emit "somethings wrong, expected a program with labels but got " x)))
+    (emit port "somethings wrong, expected a program with labels but got " x)))
 
-(define (emit-library x)
+(define (emit-library port x)
   (if (labels? x)
     (begin
-      (emit-flag "bits 64")
+      (emit-flag port "bits 64")
 
       ; emit main library code
-      (emit-expr (caddr x) (pointer-index arg-stack-pos))
+      (emit-expr port (caddr x) (pointer-index arg-stack-pos))
 
       ; emit code for labels
-      (emit-flag ".scheme_labels:")
-      (emit-labels (cadr x) (cadr x)))
+      (emit-flag port ".scheme_labels:")
+      (emit-labels port (cadr x) (cadr x)))
 
-    (emit "somethings wrong, expected a program with labels but got " x)))
+    (emit port "somethings wrong, expected a program with labels but got " x)))
 
 (define (lambda? x)
   (and (list? x)
@@ -1147,15 +1156,11 @@
   (list 'cons foo bar))
 
 (define (change-let-binding name new-value binds)
-  (when (not (null? binds))
-    (emit-comment name " " (car binds)))
-
   (cond
     ((null? binds)
      '())
 
     ((eq? name (caar binds))
-     (emit-comment "got here")
      (cons
        (construct-let-binding name new-value)
        (change-let-binding name new-value (cdr binds))))
@@ -1197,7 +1202,7 @@
     (true x)))
 
 (define (insert-lets vars xs)
-  (emit-comment "replacing " vars)
+  ;(emit-comment "replacing " vars)
   (list (construct-let
       (list (list (car vars)
                   (list 'vector (cadr vars))))
@@ -1217,10 +1222,6 @@
                                (list x (unique-temp-var)))
                              found-vars)))
 
-       (for arg in (lambda-args x)
-          (when (member? arg (car assigns))
-            (emit-comment "lambda has assignment statement for argument " arg " in it's body")))
-
        ;assigns
        (list
          (list-remove-objs (lambda-args x) (car assigns))
@@ -1235,10 +1236,6 @@
             (right (transform-assignments (body x)))
             (assigns (append (car left) (car right)))
             (found-vars (intersect (map car (bindings x)) assigns)))
-
-       (for (key value) in (bindings x)
-          (when (member? key assigns)
-            (emit-comment "let has assignment statement for binding " key " in it's body")))
 
        (list
          (list-remove-objs (map car (bindings x)) assigns)
@@ -1440,16 +1437,18 @@
 (define (compile-object x args)
   ;; todo: do this more efficiently once it becomes a problem,
   ;;       keeping the tree from each step is not good for memory usage
+  (define out-port (open "/dev/stdout" "w"))
+
   (cond
     ((arguments-contain-flag? "-dump" args)
      (let ((dumps (get-lib-field "-dump" args)))
        (analysis-passes x dumps)))
 
     ((arguments-contain-flag? "-library" args)
-     (emit-library vars-resolved))
+     (emit-library out-port (analysis-passes x #f)))
 
     (else
-      (emit-program (analysis-passes x #f)))))
+      (emit-program out-port (analysis-passes x #f)))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)
@@ -1489,7 +1488,6 @@
   (if (>= (length (argument-fields args)) 1)
     ; TODO: handle actually outputing to different files
     (for filename in (argument-fields args)
-      (emit-comment "compiling " filename)
       (let* ((port (open filename "r"))
              (program (cons 'begin (read-program port))))
         (compile-object program args)

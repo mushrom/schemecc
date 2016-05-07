@@ -56,7 +56,13 @@
   (newline))
 
 (define (emit-label labelspec)
-  (for-each display labelspec)
+  (cond
+    ((list? labelspec)
+     (for-each display labelspec))
+
+    (else
+      (display labelspec)))
+
   (display ":")
   (newline))
 
@@ -71,7 +77,7 @@
   (set! *cur-temp* (+ *cur-temp* 1))
   (string->symbol
     (string-append
-      "temp"
+      ".temp"
       (number->string *cur-temp*))))
 
 (define (shift-left x amount)
@@ -142,6 +148,26 @@
   (and (list? x)
        (not (null? x))
        (eq? (car x) 'define-library)))
+
+(define (quoted? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'quote)))
+
+(define (expanded-string? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'string)))
+
+(define (constant-set!? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'constant-set!)))
+
+(define (constant-ref? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (car x) 'constant-ref)))
 
 (define variable? symbol?)
 
@@ -602,6 +628,17 @@
     (emit-expr (car (get-lib-field 'begin (library-fields x))) sindex)
     (emit "ret")))
 
+(define (emit-constant-set! x sindex)
+  (with x as (unused label value)
+    (emit-comment "constant-set!: " label ", "value)
+    (emit-expr value sindex)
+    (emit "mov [" label "], rax" )))
+
+(define (emit-constant-ref x)
+  (with x as (unused label)
+    (emit-comment "constant-ref: " label)
+    (emit "mov rax, [" label "]")))
+
 (define (emit-expr x sindex)
   ;(emit-comment "expression: " x)
   ;(emit-comment "============================")
@@ -621,7 +658,7 @@
      (emit-comment "Got variable reference.")
      (emit-comment "This shouldn't happen, should have been caught in var. ref pass" x)
      (emit-comment "todo: error out here")
-     (emit "rawwwwwwwwwr!"))
+     (abandon-hope (list "Have unbound variable reference \"" x "\"in codegen, wut?")))
 
     ((primcall? x)
      (emit-primitive-call x sindex))
@@ -641,6 +678,12 @@
     ((library-ref? x)
      (emit-library-ref x sindex))
 
+    ((constant-set!? x)
+     (emit-constant-set! x sindex))
+
+    ((constant-ref? x)
+     (emit-constant-ref x))
+
     ((list? x)
      (emit-funcall x sindex))
 
@@ -654,6 +697,19 @@
 (define (label-code-free-vars x)
   (cadr (cadr x)))
 
+(define (get-label-type x)
+  (caadr x))
+
+(define (code-label? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (get-label-type x) 'code)))
+
+(define (datum-label? x)
+  (and (list? x)
+       (not (null? x))
+       (eq? (get-label-type x) 'datum)))
+
 (define (emit-label-code x labels)
   (emit-comment (label-code-body x))
   (emit-label (car x))
@@ -662,10 +718,27 @@
                                     (length (label-code-free-vars x)))))
   (emit "ret"))
 
+(define (emit-label-datum x labels)
+  (emit-label (car x))
+  (emit "resq 1"))
+
 (define (emit-labels x labels)
   (when (not (null? x))
-    (emit-comment "emitting " (car x))
-    (emit-label-code (car x) labels)
+    (let ((cur-label (car x)))
+      (emit-comment "emitting " cur-label)
+      (cond
+        ((code-label? cur-label)
+         (emit-flag "section .text")
+         (emit-label-code cur-label labels))
+
+        ((datum-label? cur-label)
+         (emit-flag "section .bss")
+         (emit-label-datum cur-label labels))
+
+        (else
+          (abandon-hope (list "unknown label type :"
+                              (get-label-type cur-label))))))
+
     (emit-labels (cdr x) labels)))
 
 (define (emit-program x)
@@ -674,6 +747,7 @@
       (emit-flag "bits 64")
       (emit-flag "extern scheme_heap")
       (emit-flag "global scheme_thing")
+      (emit-flag "section .text")
       (emit-flag "scheme_thing:")
       (emit "push rbp")
       (emit "push rbx")
@@ -793,6 +867,7 @@
 
 (define (gen-labels x)
   (define labels '())
+  (define constants '())
 
   (define (gen-closure x)
     (let ((label (unique-label)))
@@ -807,10 +882,27 @@
 
       (list 'closure label (apply values (trans-lambda-free x)))))
 
+  (define (gen-constant x)
+    (let ((label (unique-temp-var)))
+      (set! constants
+        (cons (list label (cadr x))
+              constants))
+
+      (set! labels
+        (cons
+          (list label
+            (list 'datum))
+          labels))
+
+      (list 'constant-ref label)))
+
   (define (replace-lambdas x)
     (cond
       ((lambda? x)
        (gen-closure x))
+
+      ((quoted? x)
+       (gen-constant x))
 
       ((null? x)
        '())
@@ -822,8 +914,27 @@
 
       (true x)))
 
+  (define (gen-constant-code label)
+    (define (iter x)
+      (cond
+        ((null? x) '())
+
+        ((expanded-string? x) x)
+
+        ((list? x)
+         (construct-cons
+           (car x)
+           (iter (cdr x))))
+
+        (else x)))
+
+    (list 'constant-set! (car label) (iter (cadr label))))
+
   (let ((new-body (replace-lambdas x)))
-    (list 'labels labels new-body)))
+    (list 'labels labels
+      (cons 'begin
+        (append (map gen-constant-code constants)
+                (list new-body))))))
 
 (define (list-index obj xs)
   (define (list-index-loop obj xs count)
@@ -888,7 +999,8 @@
          (resolve-var-refs (get-lib-field 'begin (library-fields x)) '() '())
          (library-fields x))))
 
-    ((library-set!? x)
+    ((or (library-set!?  x)
+         (constant-set!? x))
      (cons
        (car x)
        (cons
@@ -897,7 +1009,9 @@
            (caddr x)
            (resolve-var-refs (cddr (cdr x)) closure env)))))
 
-    ((library-ref? x) x)
+    ((or (library-ref?  x)
+         (constant-ref? x))
+     x)
 
     ((list? x)
      (cons
@@ -907,15 +1021,17 @@
     (true x)))
 
 (define (resolve-code-label-var-refs x)
-  (let ((code-def (cadr x)))
-    (list (car x)
-       (list (car code-def)
-             (cadr code-def)
-             (caddr code-def)
-             (apply values
-                    (resolve-var-refs (label-code-body x)
-                                      code-def
-                                      (cadr code-def)))))))
+  (if (code-label? x)
+    (let ((code-def (cadr x)))
+      (list (car x)
+            (list (car code-def)
+                  (cadr code-def)
+                  (caddr code-def)
+                  (apply values
+                         (resolve-var-refs (label-code-body x)
+                                           code-def
+                                           (cadr code-def))))))
+   else x))
 
 (define (resolve-labels-var-refs x)
   (list
@@ -1026,6 +1142,9 @@
 
 (define (construct-begin :rest code)
   (cons 'begin code))
+
+(define (construct-cons foo bar)
+  (list 'cons foo bar))
 
 (define (change-let-binding name new-value binds)
   (when (not (null? binds))

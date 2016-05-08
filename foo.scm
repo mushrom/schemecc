@@ -907,17 +907,22 @@
 
   (define (gen-constant x)
     (let ((label (unique-temp-var)))
-      (set! constants
-        (cons (list label (cadr x))
-              constants))
+      (cond
+        ((immediate? (cadr x))
+         (cadr x))
 
-      (set! labels
-        (cons
-          (list label
-            (list 'datum))
-          labels))
+        (else
+          (set! constants
+            (cons (list label (cadr x))
+                  constants))
 
-      (list 'constant-ref label)))
+          (set! labels
+            (cons
+              (list label
+                    (list 'datum))
+              labels))
+
+          (list 'constant-ref label)))))
 
   (define (replace-lambdas x)
     (cond

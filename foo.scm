@@ -1251,7 +1251,7 @@
            (list-replace-objs* var-pairs (lambda-args x))
            (expand insert-lets
                    var-pairs
-                   (replace-assignments (lambda-body x) (car assigns)))))))
+                   (replace-assignments (cadr assigns) (car assigns)))))))
 
     ((let? x)
      (let* ((left  (transform-assignments (bindings x)))

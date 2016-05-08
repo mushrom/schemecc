@@ -9,14 +9,14 @@
   (newline))
 
 (define (map f xs)
-  (if (= xs ())
-    ()
+  (if (= xs (quote ()))
+    (quote ())
     (cons (f (car xs))
       (map f (cdr xs)))))
 
 (define (for-each f xs)
-  (if (= xs ())
-    ()
+  (if (= xs (quote ()))
+    (quote ())
     (begin
       (f (car xs))
       (for-each f (cdr xs)))))
@@ -33,4 +33,4 @@
     (cons 1
       (cons 2
         (cons 3
-          (cons 123 ()))))))
+          (cons 123 (quote ())))))))

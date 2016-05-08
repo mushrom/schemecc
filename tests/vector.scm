@@ -6,4 +6,4 @@
       (vector-ref v 1)
       (cons
         (vector-ref v 0)
-        ()))))
+        (quote ())))))

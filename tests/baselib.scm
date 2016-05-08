@@ -6,6 +6,6 @@
     (cons #\a
       (cons #\b
         (cons #\c
-              ()))))
+              (quote ())))))
 
 (newline)

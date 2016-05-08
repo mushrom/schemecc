@@ -931,6 +931,9 @@
        '())
 
       ((list? x)
+       (when (null? (car x))
+         (abandon-hope (list "empty expression (todo: better error message)")))
+
        (cons
          (replace-lambdas (car x))
          (replace-lambdas (cdr x))))

@@ -857,6 +857,9 @@
        (lambda-body x)
        (append (lambda-args x) defined-vars)))
 
+    ((quoted? x)
+     '())
+
     ((list? x)
      (append (gen-free-vars (car x) defined-vars)
              (gen-free-vars (cdr x) defined-vars)))

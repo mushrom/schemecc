@@ -243,6 +243,28 @@
 (define (library-name x)
   (cadr x))
 
+(define (find-library-path lib-name suffix)
+  (define lib-file (gen-library-file-name lib-name))
+
+  (define (iter paths)
+    (cond
+      ((null? paths)
+       (abandon-hope (list "Could not find library " lib-name)))
+
+      ((exists? (string-concat (list (car paths) "/" lib-file suffix)))
+       (string-concat (list (car paths) "/" lib-file suffix)))
+
+      (true
+        (iter (cdr paths)))))
+
+  (iter '("." "libs")))
+
+(define (find-library-object-path lib-name)
+  (find-library-path lib-name ".o"))
+
+(define (find-library-stub-path lib-name)
+  (find-library-path lib-name ".libstub"))
+
 (define (immediate-rep x)
   (cond ((integer? x) (shift-left x 2))
 
@@ -606,38 +628,12 @@
        (eq? (car x) 'import)))
 
 (define (gen-library-file-name libname)
-  (gen-library-sym libname "lib.libstub"))
+  (gen-library-sym libname "lib"))
 
 (define (emit-library-definition port x sindex)
   (emit-comment port "emitting library definition for " (library-name x))
 
-  (let ((exports (get-lib-field 'export (library-fields x)))
-        (libname (library-name x)))
-    (emit-comment port exports)
-
-    (let ((stubfile (open (gen-library-file-name libname) "w")))
-      (write
-        (construct-library-definition
-          (library-name x)
-          (change-lib-field 'begin '(...) (library-fields x)))
-        stubfile)
-
-      (display #\newline stubfile))
-
-    (emit-flag port "section .bss")
-
-    (when (not (null? exports))
-      (for sym in (car exports)
-         (emit-flag port "global " (gen-library-sym libname (sanitize-module-sym sym)))
-         (emit-module-label port libname (sanitize-module-sym sym))
-         (emit port "resq " 1)))
-
-    (emit-flag port "section .text")
-
-    (emit-flag port "global " (gen-library-sym libname "lib"))
-    (emit-module-label port (library-name x) "lib")
-    (emit-expr port (car (get-lib-field 'begin (library-fields x))) sindex)
-    (emit port "ret")))
+  )
 
 (define (emit-constant-set! port x sindex)
   (with x as (unused label value)
@@ -775,13 +771,28 @@
 
     (emit port "somethings wrong, expected a program with labels but got " x)))
 
-(define (emit-library port x)
+(define (emit-library port x libname lib)
   (if (labels? x)
     (begin
       (emit-flag port "bits 64")
 
+      (let ((exports    (get-lib-field 'export (library-fields lib)))
+            (full-name  (library-name lib)))
+        (emit-flag port "section .bss")
+
+        (when (not (null? exports))
+          (for sym in (car exports)
+               (emit-flag port "global " (gen-library-sym full-name (sanitize-module-sym sym)))
+               (emit-module-label port full-name (sanitize-module-sym sym))
+               (emit port "resq " 1))))
+
+      (emit-flag port "section .text")
+      (emit-flag port "global " libname)
+      (emit-flag port libname ":")
+
       ; emit main library code
       (emit-expr port (caddr x) (pointer-index arg-stack-pos))
+      (emit port "ret")
 
       ; emit code for labels
       (emit-flag port ".scheme_labels:")
@@ -1330,10 +1341,9 @@
 
 (define (expand-import x body)
   (with x as (unused libname)
-    (let* ((stubfile (open (gen-library-file-name libname) "r"))
+    (let* ((stubfile (open (find-library-stub-path libname) "r"))
            (lib      (read stubfile))
            (exports  (car (get-lib-field 'export (library-fields lib)))))
-
 
       (cons
         (list 'foreign-call (gen-library-sym libname "lib"))
@@ -1347,15 +1357,13 @@
   (let ((exports   (car (get-lib-field 'export (library-fields x))))
         (libbody        (get-lib-field 'begin  (library-fields x))))
 
-    (construct-library-definition
-      (library-name x)
-      (change-lib-field
-        'begin
-        (append libbody
-                (map (lambda (sym)
-                       (list 'library-set! (library-name x) sym sym))
-                     exports))
-        (library-fields x)))))
+    (cons
+      'begin
+      (append libbody
+              (map (lambda (sym)
+                     (list 'library-set! (library-name x) sym sym))
+                   exports))
+      (library-fields x))))
 
 (define (library-definition-expanded? x)
   (eq? (get-lib-field 'expanded (library-fields x)) #t))
@@ -1411,7 +1419,13 @@
 
 (define (get-base-filename str)
   (list->string
-    (delim (string->list str) #\.)))
+    (reverse (after (reverse (string->list str)) #\.))))
+
+(define (get-base-directory str)
+  (let ((after-slash (after (reverse (string->list str)) #\/)))
+    (if (null? after-slash)
+      "."
+      (list->string (reverse after-slash)))))
 
 (define (do-transform-assignments x)
   (let ((tranformed (transform-assignments x)))
@@ -1434,21 +1448,135 @@
                                 (expand-string-constants x))))))
                        '())))))))
 
-(define (compile-object x args)
-  ;; todo: do this more efficiently once it becomes a problem,
-  ;;       keeping the tree from each step is not good for memory usage
-  (define out-port (open "/dev/stdout" "w"))
+;; find library definitions at the top level
+(define (find-libraries x)
+  (define found-libs '())
 
+  (define (recurse code)
   (cond
-    ((arguments-contain-flag? "-dump" args)
-     (let ((dumps (get-lib-field "-dump" args)))
-       (analysis-passes x dumps)))
+    ((null? code)
+     '())
 
-    ((arguments-contain-flag? "-library" args)
-     (emit-library out-port (analysis-passes x #f)))
+    ((and (list? code)
+         (unexpanded-library-definition? (car code)))
+     (set! found-libs (cons (car code) found-libs))
+     (recurse (cdr code)))
 
-    (else
-      (emit-program out-port (analysis-passes x #f)))))
+    ((list? code)
+      (cons (car code)
+            (recurse (cdr code))))
+
+    (else code)))
+
+  (let ((new-body (recurse x)))
+    (list found-libs new-body)))
+
+(define (find-imports x)
+  (cond
+    ((null? x)
+     '())
+
+    ((and (list? x)
+          (library-import? (car x)))
+     (append (cdar x)
+             (find-imports (cdr x))))
+
+    ((list? x)
+     (find-imports (cdr x)))
+
+    (else '())))
+
+(define (compile-program filename args code)
+  (let* ((base-name (get-base-filename filename))
+         (asm-name  (string-append base-name ".asm"))
+         (obj-name  (string-append base-name ".o"))
+         (prog-name base-name)
+         (imports   (find-imports code)))
+
+    (for-each display (list "compiling " filename #\newline))
+    (for-each display (list #\tab " => " asm-name  #\newline
+                            #\tab " => " obj-name  #\newline
+                            #\tab " => " prog-name #\newline))
+
+    (for import in imports
+         (display-list "import: " import " => " (gen-library-file-name import) ".o" #\newline))
+
+    (cond
+      ((arguments-contain-flag? "-dump" args)
+       (let ((dumps (get-lib-field "-dump" args)))
+         (analysis-passes code dumps)))
+
+      (else
+        (let ((out-port (open asm-name "w")))
+          (emit-program out-port
+            (analysis-passes (cons 'begin code) #f))
+          (close out-port))
+
+        (system (concat "nasm -felf64 -o " obj-name " " asm-name))
+        (system (string-concat
+                  (append
+                    (list "gcc -o " prog-name " " obj-name " stub.o")
+                    (map (lambda (x)
+                           (string-append
+                             " "
+                             (find-library-object-path x)))
+                         imports))))))))
+
+(define (compile-library-stub lib filename)
+  (let ((stubfile (open filename "w")))
+    (write
+      (construct-library-definition
+        (library-name lib)
+        (change-lib-field 'begin '(...) (library-fields lib)))
+      stubfile)
+
+    (display #\newline stubfile)
+    (close stubfile)))
+
+(define (compile-library filename args lib)
+  (let* ((base-dir  (get-base-directory filename))
+         (lib-name  (gen-library-file-name (library-name lib)))
+         (asm-name  (concat base-dir "/" lib-name ".asm"))
+         (stub-name (concat base-dir "/" lib-name ".libstub"))
+         (obj-name  (concat base-dir "/" lib-name ".o")))
+
+    (for-each display (list "got library " (library-name lib)
+                            #\newline #\tab " => " asm-name
+                            #\newline #\tab " => " obj-name
+                            #\newline #\tab " => " stub-name
+                            #\newline
+                            ))
+
+    (cond
+      ((arguments-contain-flag? "-dump" args)
+       (let ((dumps (get-lib-field "-dump" args)))
+         (analysis-passes lib dumps)))
+
+      (true
+        (compile-library-stub lib stub-name)
+
+        (let ((out-port (open asm-name "w")))
+          (emit-library out-port
+                        (analysis-passes lib #f)
+                        lib-name
+                        lib)
+          (close out-port))
+
+        (system (concat "nasm -f elf64 -o " obj-name " " asm-name))))))
+
+(define (compile-file filename args)
+  (define program (read-program (open filename "r")))
+
+  (with (find-libraries program) as (libs code)
+        (for lib in libs
+             (let ((basedir   (get-base-directory filename))
+                   (libname   (get-base-filename (gen-library-file-name (library-name lib)))))
+
+               (compile-library filename args lib)))
+
+        (if (null? code)
+          (for-each display (list "file " filename " has no code statements, not compiling..." #\newline))
+          (compile-program filename args code))))
 
 ;; todo: remove this once proper ports are implemented in gojira
 (define (eof-object? x)
@@ -1486,12 +1614,8 @@
 ; program entry
 (let ((args (parse-args *arguments*)))
   (if (>= (length (argument-fields args)) 1)
-    ; TODO: handle actually outputing to different files
     (for filename in (argument-fields args)
-      (let* ((port (open filename "r"))
-             (program (cons 'begin (read-program port))))
-        (compile-object program args)
-        ))
+        (compile-file filename args))
 
   else
     (for-each print

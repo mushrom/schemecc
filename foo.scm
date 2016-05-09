@@ -105,6 +105,12 @@
 (define (pointer-index n)
   (* n wordsize))
 
+(define (make-basic-type-check sym)
+  (lambda (x)
+    (and (list? x)
+         (not (null? x))
+         (eq? (car x) sym))))
+
 (define (immediate? x)
   (or (integer? x)
       (null? x)
@@ -120,67 +126,19 @@
                           string
                           ))))
 
-(define (let? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'let)))
-
-(define (if? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'if)))
-
-(define (labels? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'labels)))
-
-(define (closure? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'closure)))
-
-(define (foreign-call? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'foreign-call)))
-
-(define (set!? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'set!)))
-
-(define (library-definition? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'define-library-expanded)))
-
-(define (unexpanded-library-definition? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'define-library)))
-
-(define (quoted? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'quote)))
-
-(define (expanded-string? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'string)))
-
-(define (constant-set!? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'constant-set!)))
-
-(define (constant-ref? x)
-  (and (list? x)
-       (not (null? x))
-       (eq? (car x) 'constant-ref)))
-
-(define variable? symbol?)
+(define variable?        symbol?)
+(define let?             (make-basic-type-check 'let))
+(define if?              (make-basic-type-check 'if))
+(define labels?          (make-basic-type-check 'labels))
+(define closure?         (make-basic-type-check 'closure))
+(define foreign-call?    (make-basic-type-check 'foreign-call))
+(define set!?            (make-basic-type-check 'set!))
+(define quoted?          (make-basic-type-check 'quote))
+(define expanded-string? (make-basic-type-check 'string))
+(define constant-set!?   (make-basic-type-check 'constant-set!))
+(define constant-ref?    (make-basic-type-check 'constant-ref))
+(define library-definition?            (make-basic-type-check 'define-library-expanded))
+(define unexpanded-library-definition? (make-basic-type-check 'define-library))
 
 (define (primcall-op x)
   (car x))

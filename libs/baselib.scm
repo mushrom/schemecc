@@ -1,5 +1,5 @@
 (define-library (scheme base)
-   (export (write newline map for-each print))
+   (export write newline map for-each print)
 
    (begin
      (define (write x)

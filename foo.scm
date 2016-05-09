@@ -781,7 +781,7 @@
         (emit-flag port "section .bss")
 
         (when (not (null? exports))
-          (for sym in (car exports)
+          (for sym in exports
                (emit-flag port "global " (gen-library-sym full-name (sanitize-module-sym sym)))
                (emit-module-label port full-name (sanitize-module-sym sym))
                (emit port "resq " 1))))
@@ -1354,7 +1354,7 @@
   (with x as (unused libname)
     (let* ((stubfile (open (find-library-stub-path libname) "r"))
            (lib      (read stubfile))
-           (exports  (car (get-lib-field 'export (library-fields lib)))))
+           (exports  (get-lib-field 'export (library-fields lib))))
 
       (cons
         (list 'foreign-call (gen-library-sym libname "lib"))
@@ -1365,8 +1365,8 @@
                 body)))))
 
 (define (expand-library-definition x)
-  (let ((exports   (car (get-lib-field 'export (library-fields x))))
-        (libbody        (get-lib-field 'begin  (library-fields x))))
+  (let ((exports   (get-lib-field 'export (library-fields x)))
+        (libbody   (get-lib-field 'begin  (library-fields x))))
 
     (cons
       'begin

@@ -122,6 +122,7 @@
        (not (null? x))
        (member? (car x) '(add1 + - < > = cons car cdr begin
                           vector vector-ref vector-set!
+                          assignment-set! assignment-ref
                           stack-ref closure-ref
                           string
                           ))))
@@ -139,6 +140,8 @@
 (define constant-ref?    (make-basic-type-check 'constant-ref))
 (define library-definition?            (make-basic-type-check 'define-library-expanded))
 (define unexpanded-library-definition? (make-basic-type-check 'define-library))
+(define assignment-set!? (make-basic-type-check 'assignment-set!))
+(define assignment-ref?  (make-basic-type-check 'assignment-ref))
 
 (define (primcall-op x)
   (car x))
@@ -367,7 +370,8 @@
          (emit port "or rax, 0b010")
          (emit port "add rbp, " (pointer-index (+ 1 veclen)))))
 
-       ((eq? op 'vector-ref)
+       ((or (eq? op 'vector-ref)
+            (eq? op 'assignment-ref))
         ; todo: add length checking and error out when appropriate
         (emit-expr port (primcall-op-2 x) sindex)
         (emit port "mov [rsp - " sindex "], rax")
@@ -375,11 +379,12 @@
 
         (emit port "mov rdx, [rsp - " sindex "]")
         (emit port "shl rdx, 1") ; numbers are already the number multiplied by 4, so
-                            ; we can shift left by one to make it multiplied by 8
+        ; we can shift left by one to make it multiplied by 8
         (emit port "and rax, ~0b010")
         (emit port "mov rax, [rax + rdx + 8]"))
 
-       ((eq? op 'vector-set!)
+       ((or (eq? op 'vector-set!)
+            (eq? op 'assignment-set!))
         (emit-expr port (primcall-op-2 x) sindex)
         (emit port "mov [rsp - " sindex "], rax")
 
@@ -1126,6 +1131,17 @@
     (cons vec
       (cons index '()))))
 
+(define (construct-assignment-set vec index value)
+  (cons 'assignment-set!
+    (cons vec
+      (cons index
+        (cons value '())))))
+
+(define (construct-assignment-ref vec index)
+  (cons 'assignment-ref
+    (cons vec
+      (cons index '()))))
+
 (define (construct-if condition path1 path2)
   (list 'if condition path1 path2))
 
@@ -1162,14 +1178,18 @@
     ((null? x)
      '())
 
+    ((or (assignment-set!? x)
+         (assignment-ref?  x))
+     x)
+
     ((library-ref? x) x)
 
     ((and (variable? x)
           (member? x vars))
-     (construct-vector-ref x 0))
+     (construct-assignment-ref x 0))
 
     ((set!? x)
-     (construct-vector-set
+     (construct-assignment-set
        (primcall-op-1 x)
        0
        (replace-assignments (primcall-op-2 x) vars)))

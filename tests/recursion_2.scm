@@ -1,3 +1,5 @@
+(import (scheme base))
+
 (let ((blarg
         (lambda (c)
             (set! c 10)))

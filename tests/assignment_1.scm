@@ -1,3 +1,5 @@
+(import (scheme base))
+
 (let ((f (lambda (c)
            (cons (lambda (v) (set! c v))
                  (lambda () c)))))

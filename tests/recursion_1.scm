@@ -1,3 +1,5 @@
+(import (scheme base))
+
 (let ((print-thing
         (lambda (x)
           (foreign-call print_scheme_obj x)

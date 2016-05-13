@@ -117,43 +117,58 @@
       (boolean? x)
       (char? x)))
 
-(define (primcall? x)
-  (and (list? x)
-       (not (null? x))
-       (member? (car x) '(add1 + - < > = cons car cdr begin
-                          vector vector-ref vector-set!
-                          assignment-set! assignment-ref
-                          stack-ref closure-ref
-                          string
-                          ))))
+;(define (primcall? x)
+;  (and (list? x)
+;       (not (null? x))
+;       (member? (car x) '(add1 + - < > = cons car cdr begin
+;                          vector vector-ref vector-set!
+;                          assignment-set! assignment-ref
+;                          stack-ref closure-ref
+;                          string
+;                          ))))
 
+(define primcall?        (make-basic-type-check 'primitive-call))
 (define variable?        symbol?)
 (define let?             (make-basic-type-check 'let))
 (define if?              (make-basic-type-check 'if))
+(define begin?           (make-basic-type-check 'begin))
 (define labels?          (make-basic-type-check 'labels))
 (define closure?         (make-basic-type-check 'closure))
 (define foreign-call?    (make-basic-type-check 'foreign-call))
 (define set!?            (make-basic-type-check 'set!))
 (define quoted?          (make-basic-type-check 'quote))
-(define expanded-string? (make-basic-type-check 'string))
+;(define expanded-string? (make-basic-type-check 'string))
 (define constant-set!?   (make-basic-type-check 'constant-set!))
 (define constant-ref?    (make-basic-type-check 'constant-ref))
 (define library-definition?            (make-basic-type-check 'define-library-expanded))
 (define unexpanded-library-definition? (make-basic-type-check 'define-library))
-(define assignment-set!? (make-basic-type-check 'assignment-set!))
-(define assignment-ref?  (make-basic-type-check 'assignment-ref))
+
+(define (expanded-string? x)
+  (and (primcall? x)
+       (eq? (primcall-op x) 'string)))
+
+(define (assignment-set!? x)
+  (and (primcall? x)
+       (eq? (primcall-op x) 'assignment-set!)))
+
+(define (assignment-ref? x)
+  (and (primcall? x)
+       (eq? (primcall-op x) 'assignment-ref)))
 
 (define (primcall-op x)
-  (car x))
-
-(define (primcall-op-1 x)
   (cadr x))
 
-(define (primcall-op-2 x)
+(define (primcall-op-1 x)
   (caddr x))
 
-(define (primcall-op-3 x)
+(define (primcall-op-2 x)
   (caddr (cdr x)))
+
+(define (primcall-op-3 x)
+  (caddr (cddr x)))
+
+(define (primcall-body x)
+  (cddr x))
 
 (define (closure-free closure)
   (if (null? closure)
@@ -349,14 +364,10 @@
       ((eq? op 'stack-ref)
        (emit port "mov rax, [rsp - " (pointer-index (+ arg-stack-pos (primcall-op-1 x))) "]"))
 
-      ((eq? op 'begin)
-       (emit-comment port (cdr x))
-       (emit-expr-list port (cdr x) sindex))
-
       ((eq? op 'vector)
        (emit-comment port "making vector")
 
-       (let ((veclen (length (cdr x))))
+       (let ((veclen (length (primcall-body x))))
          (define (loopy args i)
            (when (not (null? args))
              (emit-expr port (car args) sindex)
@@ -365,7 +376,7 @@
 
          (emit port "mov rax, " (immediate-rep veclen))
          (emit port "mov [rbp], rax")
-         (loopy (cdr x) 1)
+         (loopy (primcall-body x) 1)
          (emit port "mov rax, rbp")
          (emit port "or rax, 0b010")
          (emit port "add rbp, " (pointer-index (+ 1 veclen)))))
@@ -405,7 +416,7 @@
        ((eq? op 'string)
         ;; (string ...) must have ... as a list of constant characters,
         ;; so there's no need to do an (emit-expr) here
-        (let ((strlen (+ 1 (length (cdr x)))))
+        (let ((strlen (+ 1 (length (primcall-body x)))))
           ;; todo: find more efficient way to do this
           (define (str-iter x str)
             (if (not (null? str))
@@ -420,7 +431,7 @@
 
           (emit port "mov rax, " strlen)
           (emit port "mov [rbp], rax")
-          (str-iter wordsize (cdr x))
+          (str-iter wordsize (primcall-body x))
 
           (emit port "mov rax, rbp")
           (emit port "or rax, 0b011")
@@ -434,6 +445,10 @@
     (emit-comment port "emitting next expression in list")
     (emit-expr port (car xs) sindex)
     (emit-expr-list port (cdr xs) sindex)))
+
+(define (emit-begin port x sindex)
+  (emit-comment port (cdr x))
+  (emit-expr-list port (cdr x) sindex))
 
 (define bindings cadr)
 (define body     cddr)
@@ -540,9 +555,9 @@
       (iter (cdr args) (cdr regs))))
 
   (iter (cddr x) call-regs)
-  (emit-flag port "extern " (primcall-op-1 x))
+  (emit-flag port "extern " (cadr x))
   (emit port "sub rsp, " sindex)
-  (emit port "call " (primcall-op-1 x))
+  (emit port "call " (cadr x))
   (emit port "add rsp, " sindex))
 
 (define (gen-library-sym name thing)
@@ -559,9 +574,31 @@
                            (list thing ":")))))
 
 (define (sanitize-module-sym sym)
+  (define translate
+    '((#\- "_hyphen_")
+      (#\= "_equal_")
+      (#\? "_question_")
+      (#\< "_lessthan_")
+      (#\> "_greaterthan_")
+      (#\+ "_plus_")
+      (#\- "_minus_")
+      (#\* "_times_")
+      (#\/ "_slash_")
+      ))
+
+  (define (iter xs)
+    (cond
+      ((null? xs) '())
+
+      ((not (eq? (assq (car xs) translate) #f))
+       (append (string->list (assq (car xs) translate))
+               (iter (cdr xs))))
+
+      (else (cons (car xs)
+                  (iter (cdr xs))))))
+
   (list->string
-    (list-remove-objs '(#\-)
-                     (string->list (symbol->string sym)))))
+    (iter (string->list (symbol->string sym)))))
 
 (define (emit-library-set! port x sindex)
   (with x as (unused libname libsym value)
@@ -630,6 +667,9 @@
 
     ((primcall? x)
      (emit-primitive-call port x sindex))
+
+    ((begin? x)
+     (emit-begin port x sindex))
 
     ((closure? x)
      (emit-closure port x sindex))
@@ -802,7 +842,7 @@
        (append (map car (cadr x)) defined-vars)))
 
     ((primcall? x)
-     (gen-free-vars (cdr x) defined-vars))
+     (gen-free-vars (cddr x) defined-vars))
 
     ((if? x)
      (gen-free-vars (if-expressions x) defined-vars))
@@ -822,6 +862,9 @@
 
     ((quoted? x)
      '())
+
+    ((begin? x)
+     (gen-free-vars (cdr x) defined-vars))
 
     ((list? x)
      (append (gen-free-vars (car x) defined-vars)
@@ -962,10 +1005,15 @@
           (resolve-var-refs (cddr x) closure
                             (append env (map car (bindings x)))))))
 
-    ((or (primcall? x)
+    ((or (begin? x)
          (if? x))
      (cons (car x)
            (resolve-var-refs (cdr x) closure env)))
+
+    ((primcall? x)
+     (cons (car x)
+       (cons (cadr x)
+         (resolve-var-refs (cddr x) closure env))))
 
     ((foreign-call? x)
      (cons 'foreign-call
@@ -975,10 +1023,12 @@
     ((variable? x)
      (cond
        ((member? x env)
-        (list 'stack-ref (list-index x env)))
+        (construct-primitive-call
+          (list 'stack-ref (list-index x env))))
 
        ((member? x (closure-free closure))
-        (list 'closure-ref (list-index x (closure-free closure))))
+        (construct-primitive-call
+          (list 'closure-ref (list-index x (closure-free closure)))))
 
        (true
          (abandon-hope (list "undefined variable :" x))
@@ -1106,6 +1156,9 @@
       (fun (car iter)
            (expand fun (cdr iter) data)))))
 
+(define (construct-primitive-call x)
+  (cons 'primitive-call x))
+
 (define (construct-lambda args body)
   (cons 'lambda
     (cons args body)))
@@ -1115,7 +1168,8 @@
     (cons binds body)))
 
 (define (construct-vector :rest args)
-  (cons 'vector args))
+  (construct-primitive-call
+    (cons 'vector args)))
 
 (define (construct-let-binding name value)
   (list name value))
@@ -1132,15 +1186,17 @@
       (cons index '()))))
 
 (define (construct-assignment-set vec index value)
-  (cons 'assignment-set!
-    (cons vec
-      (cons index
-        (cons value '())))))
+  (construct-primitive-call
+    (cons 'assignment-set!
+      (cons vec
+        (cons index
+          (cons value '()))))))
 
 (define (construct-assignment-ref vec index)
-  (cons 'assignment-ref
-    (cons vec
-      (cons index '()))))
+  (construct-primitive-call
+    (cons 'assignment-ref
+      (cons vec
+        (cons index '())))))
 
 (define (construct-if condition path1 path2)
   (list 'if condition path1 path2))
@@ -1149,7 +1205,10 @@
   (cons 'begin code))
 
 (define (construct-cons foo bar)
-  (list 'cons foo bar))
+  (construct-primitive-call (list 'cons foo bar)))
+
+(define set!-op-1 cadr)
+(define set!-op-2 caddr)
 
 (define (change-let-binding name new-value binds)
   (cond
@@ -1184,15 +1243,20 @@
 
     ((library-ref? x) x)
 
+    ((primcall? x)
+     (construct-primitive-call
+       (cons (primcall-op x)
+             (replace-assignments (primcall-body x) vars))))
+
     ((and (variable? x)
           (member? x vars))
      (construct-assignment-ref x 0))
 
     ((set!? x)
      (construct-assignment-set
-       (primcall-op-1 x)
+       (set!-op-1 x)
        0
-       (replace-assignments (primcall-op-2 x) vars)))
+       (replace-assignments (set!-op-2 x) vars)))
 
     ((list? x)
       (cons
@@ -1205,7 +1269,7 @@
   ;(emit-comment "replacing " vars)
   (list (construct-let
       (list (list (car vars)
-                  (list 'vector (cadr vars))))
+                  (construct-vector (cadr vars))))
       xs)))
 
 (define (transform-assignments x)
@@ -1247,11 +1311,11 @@
            (replace-assignments (cadr right) found-vars)))))
 
     ((set!? x)
-     (let ((set-body (transform-assignments (primcall-op-2 x))))
-       (list (list (primcall-op-1 x))
+     (let ((set-body (transform-assignments (set!-op-2 x))))
+       (list (list (set!-op-1 x))
              (cons 'set!
                    (cons
-                     (primcall-op-1 x)
+                     (set!-op-1 x)
                      (cdr set-body))))))
 
     ((list? x)
@@ -1387,7 +1451,8 @@
     (true x)))
 
 (define (expand-string x)
-  (cons 'string (string->list x)))
+  (construct-primitive-call
+    (cons 'string (string->list x))))
 
 (define (expand-string-constants x)
   (cond

@@ -1,16 +1,11 @@
-(let ((display
-        (lambda (x)
-          (foreign-call "print_scheme_obj" x)))
+(import (scheme base))
+(import (scheme write))
 
-      (newline
-        (lambda (quote ())
-          (foreign-call "s_write_char" #\newline)))
-
-      (thing
+(let ((thing
         (lambda (x y)
           (foreign-call "s_write_char" x)
           (foreign-call "s_write_char" y))))
 
-  (display (cons 1 (cons 2 (cons 3 (quote ())))))
+  (write (cons 1 (cons 2 (cons 3 (quote ())))))
   (newline)
   (thing #\A #\newline))

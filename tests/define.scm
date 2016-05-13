@@ -1,12 +1,5 @@
-(define (display x)
-  (foreign-call print_scheme_obj x))
-
-(define (newline)
-  (foreign-call s_write_char #\newline))
-
-(define (print x)
-  (display x)
-  (newline))
+(import (scheme base))
+(import (scheme write))
 
 (define (recurse x limit)
   (if (< x limit)

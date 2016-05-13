@@ -1,3 +1,5 @@
+(import (scheme base))
+
 (let ((foo (cons 1 (cons 2 (quote ()))))
       (bar (cons 3 (cons 4 (quote ())))))
 

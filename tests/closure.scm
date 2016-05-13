@@ -1,3 +1,5 @@
+(import (scheme base))
+
 (let ((x (+ 5 5))
       (double
         (lambda (y) (+ y y)))

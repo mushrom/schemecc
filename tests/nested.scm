@@ -3,7 +3,7 @@
 
 (define (foo x)
   (define (bar)
-    (+ x 1))
+    (primitive-call + x 1))
 
   (bar))
 

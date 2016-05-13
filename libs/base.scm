@@ -1,7 +1,35 @@
 (define-library (scheme base)
-   (export map for-each)
+   (export cons car cdr = eq? < > + -
+           map for-each)
 
    (begin
+     (define (cons a b)
+       (primitive-call cons a b))
+
+     (define (car x)
+       (primitive-call car x))
+
+     (define (cdr x)
+       (primitive-call cdr x))
+
+     (define (= a b)
+       (primitive-call = a b))
+
+     (define (eq? a b)
+       (primitive-call = a b))
+
+     (define (< a b)
+       (primitive-call < a b))
+
+     (define (> a b)
+       (primitive-call > a b))
+
+     (define (+ a b)
+       (primitive-call + a b))
+
+     (define (- a b)
+       (primitive-call - a b))
+
      (define (map f xs)
        (if (= xs (quote ()))
          (quote ())

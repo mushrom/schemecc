@@ -1,17 +1,7 @@
 (define-library (scheme base)
-   (export write newline map for-each print)
+   (export map for-each)
 
    (begin
-     (define (write x)
-       (foreign-call print_scheme_obj x))
-
-     (define (newline)
-       (foreign-call s_write_char #\newline))
-
-     (define (print x)
-       (write x)
-       (newline))
-
      (define (map f xs)
        (if (= xs (quote ()))
          (quote ())

@@ -1,4 +1,5 @@
 (import (scheme base))
+(import (scheme write))
 
 (print 1234)
 

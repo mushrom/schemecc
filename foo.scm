@@ -759,7 +759,7 @@
       (emit-flag port "scheme_thing:")
       (emit port "push rbp")
       (emit port "push rbx")
-      (emit port "mov rbp, scheme_heap")
+      (emit port "mov rbp, [scheme_heap]")
 
       ; emit main program code
       (emit-flag port ".scheme_entry:")
@@ -837,9 +837,13 @@
      '())
 
     ((let? x)
-     (gen-free-vars
-       (body x)
-       (append (map car (cadr x)) defined-vars)))
+     (append
+       (gen-free-vars
+         (body x)
+         (append (map car (cadr x)) defined-vars))
+       (gen-free-vars
+         (map cdr (bindings x))
+         defined-vars)))
 
     ((primcall? x)
      (gen-free-vars (cddr x) defined-vars))

@@ -76,6 +76,7 @@
 
 (define *cur-label* 0)
 (define *cur-temp* 0)
+(define *cur-if-label* 0)
 
 (define (unique-label)
   (set! *cur-label* (+ *cur-label* 1))
@@ -90,6 +91,13 @@
     (string-append
       ".temp"
       (number->string *cur-temp*))))
+
+(define (unique-if-label)
+  (set! *cur-if-label* (+ *cur-if-label* 1))
+  (string->symbol
+    (string-append
+      ".if"
+      (number->string *cur-if-label*))))
 
 (define (shift-left x amount)
   (if (> amount 0)
@@ -447,7 +455,6 @@
     (emit-expr-list port (cdr xs) sindex)))
 
 (define (emit-begin port x sindex)
-  (emit-comment port (cdr x))
   (emit-expr-list port (cdr x) sindex))
 
 (define bindings cadr)
@@ -455,7 +462,6 @@
 
 (define (emit-let port bindings body sindex)
   (define (f b* sindex)
-    (emit-comment port b* " " sindex)
     (cond
       ((null? b*)
        (emit-expr-list port body sindex))
@@ -486,8 +492,8 @@
   (emit port "jmp " labelspec))
 
 (define (emit-if port test conseq altern sindex)
-  (let ((L0 (unique-label))
-        (L1 (unique-label)))
+  (let ((L0 (unique-if-label))
+        (L1 (unique-if-label)))
     (emit-expr port test sindex)
     (emit-cmp port (immediate-rep #f) 'rax)
     (emit-je port L0)
@@ -733,7 +739,6 @@
 (define (emit-labels port x labels)
   (when (not (null? x))
     (let ((cur-label (car x)))
-      (emit-comment port "emitting " cur-label)
       (cond
         ((code-label? cur-label)
          (emit-flag port "section .text")
